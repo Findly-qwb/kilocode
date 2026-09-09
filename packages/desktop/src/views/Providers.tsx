@@ -14,15 +14,30 @@ const [status, setStatus] = createSignal("")
 
 const connected = () => new Set(data().connected)
 
+const isPlan = (id: string) => id.endsWith("coding-plan")
+
 function groups() {
   const all = data().all
   const m = methods() ?? {}
-  const oauth = all.filter((p) => (m[p.id] ?? []).some((x) => x.type === "oauth"))
-  const rest = all.filter((p) => !oauth.includes(p))
+  const oauth = all.filter((p) => !isPlan(p.id) && (m[p.id] ?? []).some((x) => x.type === "oauth"))
+  const plan = all.filter((p) => isPlan(p.id))
+  const rest = all.filter((p) => !oauth.includes(p) && !plan.includes(p))
   return [
     { label: "授权登录", list: oauth },
+    { label: "Claude Code 兼容套餐", list: plan },
     { label: "官方 API", list: rest },
-  ]
+  ].filter((g) => g.list.length)
+}
+
+async function deleteAuth(id: string) {
+  const err = await client()!
+    .auth.remove({ providerID: id })
+    .then(() => "")
+    .catch((e: Error) => e.message)
+  if (err) return store.notify(`删除失败：${err}`)
+  store.notify("凭证已删除")
+  setTick((t) => t + 1)
+  await store.refresh()
 }
 
 async function saveKey() {
@@ -80,7 +95,7 @@ export function Providers() {
             <div class="grid">
               <For each={g.list}>
                 {(p) => (
-                  <button
+                  <div
                     class="pcard"
                     onClick={() => {
                       setPicked(p.id)
@@ -89,8 +104,26 @@ export function Providers() {
                     }}
                   >
                     <b>{p.name}</b>
-                    <span>{connected().has(p.id) ? "已连接" : p.env.length ? `环境变量 ${p.env.join(", ")}` : "未配置"}</span>
-                  </button>
+                    <span>
+                      {connected().has(p.id)
+                        ? "已连接"
+                        : p.env.length
+                          ? `可用环境变量 ${p.env.join(", ")}`
+                          : "未配置"}
+                    </span>
+                    <Show when={connected().has(p.id)}>
+                      <button
+                        class="del"
+                        title="删除凭证"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void deleteAuth(p.id)
+                        }}
+                      >
+                        ×
+                      </button>
+                    </Show>
+                  </div>
                 )}
               </For>
             </div>

@@ -1,7 +1,7 @@
 import { createKiloClient } from "@kilocode/sdk/v2/client"
 import type { GlobalEvent } from "@kilocode/sdk/v2"
 import { createSignal } from "solid-js"
-import { authHeader, serverInfo, type Info } from "./backend"
+import { authHeader, onReady, serverInfo, type Info } from "./backend"
 
 export type Client = ReturnType<typeof createKiloClient>
 
@@ -62,6 +62,11 @@ export async function connect() {
   }
   rebuild()
   setReady(true)
+  // 后端重启会换端口/密码：重新监听 ready 并重建 client 与 SSE
+  void onReady((next) => {
+    setInfo(next)
+    rebuild()
+  })
   return i
 }
 
@@ -80,6 +85,12 @@ export function setDirectory(dir: string) {
   localStorage.setItem("recents", JSON.stringify(next))
   setRecents(next)
   rebuild()
+}
+
+export function forget(dir: string) {
+  const next = recents().filter((r) => r !== dir)
+  localStorage.setItem("recents", JSON.stringify(next))
+  setRecents(next)
 }
 
 export const [recents, setRecents] = createSignal<string[]>(JSON.parse(localStorage.getItem("recents") ?? "[]"))

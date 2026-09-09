@@ -1,10 +1,42 @@
-import type { Agent, Message, Part, Provider, QuestionInfo, Session } from "@kilocode/sdk/v2/types"
+import type {
+  AgentV2Info,
+  FilePartInput,
+  Message,
+  Part,
+  Provider,
+  QuestionInfo,
+  Session,
+  SnapshotFileDiff,
+  Todo,
+} from "@kilocode/sdk/v2/types"
 import { createSignal, batch } from "solid-js"
 import { client, directory, onEvent } from "./client"
 
 export type Msg = { info: Message; parts: Part[] }
 export type Pending = { id: string; sessionID: string; permission: string; patterns: string[]; always: string[] }
 export type Question = { id: string; sessionID: string; questions: QuestionInfo[] }
+export type Model = { providerID: string; modelID: string; variant?: string }
+export type Theme = "system" | "light" | "dark"
+export type Page = "chat" | "plugins" | "providers" | "files" | "settings"
+
+function persist(key: string, value: unknown) {
+  localStorage.setItem(key, JSON.stringify(value))
+}
+
+function saved(key: string): unknown {
+  const raw = localStorage.getItem(key)
+  if (!raw) return undefined
+  return JSON.parse(raw) as unknown
+}
+
+const stored = saved("model")
+const initial: Model | undefined = (() => {
+  if (typeof stored !== "object" || stored === null) return undefined
+  if (!("providerID" in stored) || !("modelID" in stored)) return undefined
+  if (typeof stored.providerID !== "string" || typeof stored.modelID !== "string") return undefined
+  const v = "variant" in stored && typeof stored.variant === "string" ? stored.variant : undefined
+  return { providerID: stored.providerID, modelID: stored.modelID, ...(v ? { variant: v } : {}) }
+})()
 
 const [sessions, setSessions] = createSignal<Session[]>([])
 const [current, setCurrent] = createSignal("")
@@ -13,11 +45,33 @@ const [busy, setBusy] = createSignal(new Set<string>())
 const [permissions, setPermissions] = createSignal<Pending[]>([])
 const [questions, setQuestions] = createSignal<Question[]>([])
 const [providers, setProviders] = createSignal<{ all: Provider[]; connected: string[] }>({ all: [], connected: [] })
-const [model, setModel] = createSignal<{ providerID: string; modelID: string }>()
-const [autoApprove, setAutoApprove] = createSignal(false)
+const [model, setModelRaw] = createSignal(initial)
+const [autoApprove, setAutoApproveRaw] = createSignal(localStorage.getItem("autoApprove") === "true")
 const [error, setError] = createSignal("")
-const [agents, setAgents] = createSignal<Agent[]>([])
-const [agent, setAgent] = createSignal("")
+const [toast, setToast] = createSignal("")
+const [agents, setAgents] = createSignal<AgentV2Info[]>([])
+const [agent, setAgentRaw] = createSignal(localStorage.getItem("agent") ?? "")
+const [todos, setTodos] = createSignal<Record<string, Todo[]>>({})
+const [theme, setThemeRaw] = createSignal<Theme>((() => {
+  const t = localStorage.getItem("theme")
+  return t === "light" || t === "dark" ? t : "system"
+})())
+const [page, setPage] = createSignal<Page>("chat")
+
+const dark = matchMedia("(prefers-color-scheme: dark)")
+function applyTheme() {
+  const want = theme() === "system" ? (dark.matches ? "dark" : "light") : theme()
+  document.documentElement.dataset.theme = want
+}
+dark.addEventListener("change", applyTheme)
+applyTheme()
+
+let toastTimer: ReturnType<typeof setTimeout> | undefined
+function notify(text: string) {
+  setToast(text)
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => setToast(""), 3000)
+}
 
 export const store = {
   sessions,
@@ -30,19 +84,65 @@ export const store = {
   model,
   autoApprove,
   error,
+  toast,
   agents,
   agent,
+  todos,
+  theme,
+  page,
+  thread,
   setModel,
   setAutoApprove,
   setAgent,
+  setTheme,
+  setPage,
   open: openSession,
   newSession,
   send,
+  retry,
   abort,
+  rename,
+  fork,
+  share,
+  unshare,
+  revertTo,
+  unrevert,
+  diff,
   replyPermission,
   replyQuestion,
+  rejectQuestion,
   removeSession,
   refresh,
+  notify,
+}
+
+function setModel(next?: Model) {
+  setModelRaw(next)
+  persist("model", next ?? null)
+}
+
+function setAutoApprove(on: boolean) {
+  setAutoApproveRaw(on)
+  persist("autoApprove", on)
+}
+
+function setAgent(name: string) {
+  setAgentRaw(name)
+  persist("agent", name || null)
+}
+
+function setTheme(t: Theme) {
+  setThemeRaw(t)
+  persist("theme", t)
+  applyTheme()
+}
+
+// reverted 之后的消息不展示；服务端 messages API 仍会返回全量
+function thread(id: string): Msg[] {
+  const list = messages()[id] ?? []
+  const rev = sessions().find((s) => s.id === id)?.revert
+  if (!rev) return list
+  return list.filter((m) => m.info.id < rev.messageID)
 }
 
 onEvent((e) => {
@@ -96,6 +196,11 @@ onEvent((e) => {
       void refreshSessions()
       return
     }
+    case "todo.updated": {
+      const { sessionID, todos: list } = p.properties
+      setTodos((all) => ({ ...all, [sessionID]: list }))
+      return
+    }
     case "permission.asked": {
       const req = p.properties
       if (autoApprove()) {
@@ -119,8 +224,9 @@ onEvent((e) => {
       return
     }
     case "session.error": {
-      const props = p.properties as { sessionID?: string; error?: { data?: { message?: string } } }
-      setError(props.error?.data?.message ?? "会话出错")
+      const props = p.properties
+      const data: { message?: unknown } | undefined = props.error?.data
+      setError(typeof data?.message === "string" ? data.message : "会话出错")
       setBusy((s) => {
         const next = new Set(s)
         next.delete(props.sessionID ?? "")
@@ -144,7 +250,8 @@ async function refreshSessions() {
   const c = client()
   if (!c) return
   const res = await c.session.list({ directory: directory(), limit: 50 })
-  setSessions((res.data ?? []).filter((s) => !s.parentID))}
+  setSessions((res.data ?? []).filter((s) => !s.parentID))
+}
 
 async function loadMessages(id: string) {
   const c = client()
@@ -156,10 +263,17 @@ async function loadMessages(id: string) {
   }))
 }
 
+async function loadTodos(id: string) {
+  const c = client()
+  if (!c) return
+  const res = await c.session.todo({ sessionID: id, directory: directory() }).catch(() => undefined)
+  if (res) setTodos((all) => ({ ...all, [id]: res.data ?? [] }))
+}
+
 async function openSession(id: string) {
   setCurrent(id)
   setError("")
-  await loadMessages(id)
+  await Promise.all([loadMessages(id), loadTodos(id)])
 }
 
 async function newSession() {
@@ -168,9 +282,9 @@ async function newSession() {
   setError("")
 }
 
-async function send(text: string) {
+async function send(text: string, files: FilePartInput[] = []) {
   const c = client()
-  if (!c || !text.trim()) return
+  if (!c || (!text.trim() && !files.length)) return
   setError("")
   let id = current()
   if (!id) {
@@ -178,18 +292,38 @@ async function send(text: string) {
     id = created.data!.id
     setCurrent(id)
     setSessions((list) => [created.data!, ...list])
+    // 必须先建空列表，否则随后的 message 事件在 mutate 里被丢弃
+    setMessages((m) => ({ ...m, [id]: [] }))
   }
   setBusy((s) => new Set(s).add(id))
   const m = model()
+  const a = agent()
   void c.session
     .prompt({
       sessionID: id,
       directory: directory(),
-      parts: [{ type: "text", text }],
-      ...(m ? { model: m } : {}),
+      parts: [{ type: "text", text }, ...files],
+      ...(m ? { model: { providerID: m.providerID, modelID: m.modelID }, ...(m.variant ? { variant: m.variant } : {}) } : {}),
+      ...(a ? { agent: a } : {}),
     })
-    .catch((e: Error) => setError(e.message))
+    .catch((e: Error) => {
+      setError(e.message)
+      setBusy((s) => {
+        const next = new Set(s)
+        next.delete(id)
+        return next
+      })
+    })
   await refreshSessions()
+}
+
+// 重发上一轮：revert 到该用户消息再带新内容重发
+async function retry(messageID: string, text: string, files: FilePartInput[]) {
+  const c = client()
+  const id = current()
+  if (!c || !id) return
+  await c.session.revert({ sessionID: id, messageID, directory: directory() }).catch((e: Error) => setError(e.message))
+  await send(text, files)
 }
 
 async function abort() {
@@ -197,6 +331,75 @@ async function abort() {
   const id = current()
   if (!c || !id) return
   await c.session.abort({ sessionID: id, directory: directory() }).catch(() => {})
+}
+
+async function rename(id: string, title: string) {
+  const c = client()
+  if (!c || !title.trim()) return
+  await c.session.update({ sessionID: id, title: title.trim(), directory: directory() }).catch(() => {})
+  await refreshSessions()
+}
+
+async function fork(id?: string) {
+  const c = client()
+  const sid = id || current()
+  if (!c || !sid) return
+  const res = await c.session.fork({ sessionID: sid, directory: directory() }).catch((e: Error) => {
+    setError(e.message)
+  })
+  if (!res?.data) return
+  await refreshSessions()
+  await openSession(res.data.id)
+}
+
+async function share(id?: string) {
+  const c = client()
+  const sid = id || current()
+  if (!c || !sid) return
+  const res = await c.session.share({ sessionID: sid, directory: directory() }).catch((e: Error) => {
+    setError(e.message)
+  })
+  const url = res?.data?.share?.url
+  if (url) {
+    await navigator.clipboard.writeText(url).catch(() => {})
+    notify("分享链接已复制")
+  }
+  await refreshSessions()
+}
+
+async function unshare(id?: string) {
+  const c = client()
+  const sid = id || current()
+  if (!c || !sid) return
+  await c.session.unshare({ sessionID: sid, directory: directory() }).catch(() => {})
+  await refreshSessions()
+}
+
+async function revertTo(messageID: string) {
+  const c = client()
+  const id = current()
+  if (!c || !id) return
+  await c.session.revert({ sessionID: id, messageID, directory: directory() }).catch((e: Error) => {
+    setError(e.message)
+  })
+}
+
+async function unrevert() {
+  const c = client()
+  const id = current()
+  if (!c || !id) return
+  await c.session.unrevert({ sessionID: id, directory: directory() }).catch(() => {})
+  await Promise.all([refreshSessions(), loadMessages(id)])
+}
+
+async function diff(id?: string): Promise<SnapshotFileDiff[]> {
+  const c = client()
+  const sid = id || current()
+  if (!c || !sid) return []
+  const res = await c.session
+    .diff({ sessionID: sid, directory: directory() })
+    .catch((e: Error) => (notify(`读取变更失败：${e.message}`), undefined))
+  return res?.data ?? []
 }
 
 async function replyPermission(requestID: string, reply: "once" | "always" | "reject") {
@@ -211,6 +414,13 @@ async function replyQuestion(requestID: string, answers: string[][]) {
   if (!c) return
   setQuestions((list) => list.filter((x) => x.id !== requestID))
   await c.question.reply({ requestID, answers, directory: directory() }).catch(() => {})
+}
+
+async function rejectQuestion(requestID: string) {
+  const c = client()
+  if (!c) return
+  setQuestions((list) => list.filter((x) => x.id !== requestID))
+  await c.question.reject({ requestID, directory: directory() }).catch(() => {})
 }
 
 async function removeSession(id: string) {
@@ -230,5 +440,7 @@ async function refresh() {
   const cfg = await c.config.providers({ directory: directory() })
   const def = cfg.data?.default
   const hit = (res.data?.connected ?? []).find((p) => def?.[p])
-  if (hit && !model()) setModel({ providerID: hit, modelID: def![hit] })
+  if (hit && !model()) setModelRaw({ providerID: hit, modelID: def![hit] })
+  const ag = await c.v2.agent.list({ location: { directory: directory() } }).catch(() => undefined)
+  setAgents((ag?.data?.data ?? []).filter((a) => a.mode !== "subagent" && !a.hidden))
 }

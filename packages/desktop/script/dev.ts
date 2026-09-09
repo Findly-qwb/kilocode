@@ -6,9 +6,11 @@ const desktop = join(import.meta.dir, "..")
 const root = join(desktop, "..", "..")
 
 process.env.KILO_CLIENT = "cli"
+// Windows 的 PATH 里常只有 npm shim（bun.ps1/bun.cmd）没有 bun.exe；用 execPath 绝对路径。
 // ponytail: 按空白切分命令，路径含空格的机器请改用打包 sidecar
+const exe = process.execPath
 process.env.KILO_DESKTOP_BACKEND_CMD = [
-  "bun",
+  exe,
   "run",
   "--cwd",
   join(root, "packages", "opencode"),
@@ -21,7 +23,7 @@ process.env.KILO_DESKTOP_BACKEND_CMD = [
   "127.0.0.1",
 ].join(" ")
 
-const proc = Bun.spawn(["bun", "run", "tauri", "dev"], {
+const proc = Bun.spawn([exe, "run", "tauri", "dev"], {
   cwd: desktop,
   stdout: "inherit",
   stderr: "inherit",
