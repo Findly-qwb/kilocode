@@ -1,0 +1,27 @@
+{
+  "name": "@kilocode/desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun script/dev.ts",
+    "dev:vite": "vite",
+    "build:vite": "vite build",
+    "sidecar": "bun script/sidecar.ts",
+    "package": "bun script/sidecar.ts && tauri build",
+    "tauri": "tauri",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@kilocode/sdk": "workspace:*",
+    "@tauri-apps/api": "^2",
+    "dompurify": "catalog:",
+    "marked": "catalog:",
+    "solid-js": "catalog:"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plugin-solid": "catalog:"
+  }
+}

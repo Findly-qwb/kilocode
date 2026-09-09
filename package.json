@@ -24,7 +24,9 @@
     "extension:isolated": "bun --cwd packages/kilo-vscode script/launch.ts --isolated",
     "extension:isolated:clean": "bun --cwd packages/kilo-vscode script/launch.ts --isolated --clean",
     "dev-setup": "bun run --cwd packages/opencode --conditions=browser src/index.ts dev-setup",
-    "dev:local": "bun run packages/opencode/script/dev-local.ts"
+    "dev:local": "bun run packages/opencode/script/dev-local.ts",
+    "desktop": "bun packages/desktop/script/dev.ts",
+    "desktop:package": "bun run --cwd packages/desktop package"
   },
   "workspaces": {
     "packages": [
