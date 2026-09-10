@@ -1,8 +1,11 @@
-import { createSignal, For, Show } from "solid-js"
+import { createSignal, For, onMount, Show } from "solid-js"
 import type { FilePartInput, Part } from "@kilocode/sdk/v2/types"
 import logo from "../assets/logo.png"
+import { client, directory } from "../client"
 import { store, type Msg, type Question } from "../store"
 import { ago, md } from "../util"
+import { GitPanel } from "./Git"
+import { Terminal } from "./Terminal"
 
 type Entry = { name: string; mime: string; url: string }
 
@@ -21,6 +24,21 @@ export function Chat() {
   const [staged, setStaged] = createSignal<Entry[]>([])
   const [renaming, setRenaming] = createSignal(false)
   const [diff, setDiff] = createSignal(false)
+  const [git, setGit] = createSignal(false)
+  const [term, setTerm] = createSignal(false)
+  const [vcs, setVcs] = createSignal<{ branch?: string; dirty: number }>({ dirty: 0 })
+
+  async function vcsRefresh() {
+    const c = client()
+    if (!c || !directory()) return
+    const [i, d] = await Promise.all([
+      c.vcs.get({ directory: directory() }).catch(() => undefined),
+      c.vcs.diff({ directory: directory(), mode: "git" }).catch(() => undefined),
+    ])
+    setVcs({ branch: i?.data?.branch, dirty: (d?.data ?? []).length })
+  }
+
+  onMount(() => void vcsRefresh())
   const msgs = () => store.thread(store.current())
   const session = () => store.sessions().find((s) => s.id === store.current())
   const pending = () => store.permissions().find((p) => p.sessionID === store.current())
@@ -49,6 +67,34 @@ export function Chat() {
     void store.send(t, files)
   }
 
+  const MIME: Record<string, string> = {
+    md: "text/markdown",
+    ts: "text/typescript",
+    tsx: "text/typescript",
+    js: "text/javascript",
+    jsx: "text/javascript",
+    json: "application/json",
+    py: "text/x-python",
+    rs: "text/rust",
+    go: "text/go",
+    css: "text/css",
+    html: "text/html",
+    yml: "text/yaml",
+    yaml: "text/yaml",
+    sh: "text/x-sh",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    svg: "image/svg+xml",
+  }
+
+  function addRef(path: string) {
+    const name = path.split("/").at(-1) ?? path
+    const mime = MIME[name.split(".").at(-1)?.toLowerCase() ?? ""] ?? "text/plain"
+    setStaged((list) => [...list, { name, mime, url: `file://${path}` }])
+  }
+
   async function edit(m: Msg) {
     if (store.busy().has(store.current())) return
     const t = textOf(m.parts).join("\n")
@@ -63,50 +109,13 @@ export function Chat() {
 
   return (
     <div class="chat">
-      <Show
-        when={store.current() || msgs().length}
-        fallback={
-          <div class="home">
-            <div class="greet">
-              <img src={logo} alt="" />
-              <h1>你好，想做点什么？</h1>
-            </div>
-            <Show when={!connected().length}>
-              <div class="hintbar center">
-                配置 API 服务商以开始对话
-                <button class="primary" onClick={() => store.setPage("providers")}>
-                  打开设置
-                </button>
-              </div>
-            </Show>
-            <Input draft={draft} setDraft={setDraft} submit={submit} staged={staged} setStaged={setStaged} add={add} />
-            <div class="cards">
-              <div class="card">
-                <div>
-                  <b>项目对话</b>
-                  <p>打开项目文件夹，AI 帮你编码、调试和重构</p>
-                </div>
-                <span class="hint">← 左侧「项目」</span>
-              </div>
-              <div class="card">
-                <div>
-                  <b>助理</b>
-                  <p>选择或新建专属助理，定制行为与提示词</p>
-                </div>
-                <span class="hint">← 左侧「助理」</span>
-              </div>
-            </div>
-          </div>
-        }
-      >
-        <div class="topbar">
-          <b class="title" onClick={() => setRenaming(true)}>
-            {session()?.title || "新对话"}
-          </b>
-          <span class="grow" />
-          <Show when={connected().length === 0}>
-            <button class="warn" onClick={() => store.setPage("providers")}>未连接服务商</button>
-          </Show>
+      <div class="topbar">
+        <b class="title">{session()?.title || "New Chat"}</b>
+        <span class="grow" />
+        <Show when={connected().length === 0}>
+          <button class="warn" onClick={() => store.setPage("providers")}>未连接服务商</button>
+        </Show>
+        <Show when={store.current()}>
           <Show when={session()?.revert}>
             <button title="恢复被回退的消息" onClick={() => void store.unrevert()}>↩ 恢复</button>
           </Show>
@@ -127,10 +136,74 @@ export function Chat() {
           <button title="查看文件变更" onClick={() => setDiff(true)}>
             Δ {session()?.summary?.files ?? 0}
           </button>
-        </div>
+        </Show>
+        <button title="Git 面板" class="branch" onClick={() => setGit(true)}>
+          ⑂ {vcs()?.branch ?? "Git"}
+          <Show when={vcs().dirty}>
+            <em class="dirt">{vcs().dirty}</em>
+          </Show>
+        </button>
+        <Show when={!term()} fallback={<button title="收起终端" onClick={() => setTerm(false)}>▾ 终端</button>}>
+          <button title="终端" onClick={() => setTerm(true)}>
+            ▴ 终端
+          </button>
+        </Show>
+      </div>
+      <Show
+        when={store.current() || msgs().length}
+        fallback={
+          <div class="home">
+            <div class="greet">
+              <img src={logo} alt="" />
+              <h1>你好，想做点什么？</h1>
+            </div>
+            <Show when={!connected().length}>
+              <div class="hintbar center">
+                配置 API 服务商以开始对话
+                <button class="primary" onClick={() => store.setPage("providers")}>
+                  打开设置
+                </button>
+              </div>
+            </Show>
+            <Input draft={draft} setDraft={setDraft} submit={submit} staged={staged} setStaged={setStaged} add={add} addRef={addRef} />
+            <div class="cards">
+              <div class="card">
+                <div>
+                  <b>项目对话</b>
+                  <p>打开项目文件夹，AI 帮你编码、调试和重构</p>
+                </div>
+                <span class="hint">← 左侧「项目」</span>
+              </div>
+              <div class="card">
+                <div>
+                  <b>助理</b>
+                  <p>选择或新建专属助理，定制行为与提示词</p>
+                </div>
+                <span class="hint">← 左侧「助理」</span>
+              </div>
+            </div>
+          </div>
+        }
+      >
         <TodoPanel />
         <div class="stream">
           <For each={msgs()}>{(m) => <Message msg={m} edit={edit} retry={retry} />}</For>
+          <Show when={pending()} keyed>
+            {(p) => (
+              <div class="ask-inline">
+                <b>{p.permission}</b>
+                <code class="tinp">{p.patterns.slice(0, 8).join("\n")}</code>
+                <div class="row">
+                  <button onClick={() => void store.replyPermission(p.id, "reject")}>Deny</button>
+                  <button onClick={() => void store.replyPermission(p.id, "always")}>Always allow</button>
+                  <button class="primary" onClick={() => void store.replyPermission(p.id, "once")}>
+                    Allow Once
+                  </button>
+                </div>
+              </div>
+            )}
+          </Show>
+          <Show when={question()} keyed>{(q) => <QuestionCard q={q} />}</Show>
           <Show when={store.busy().has(store.current())}>
             <div class="typing">Kilo 正在工作…</div>
           </Show>
@@ -138,31 +211,24 @@ export function Chat() {
             <div class="err">{store.error()}</div>
           </Show>
         </div>
-        <Show when={pending()} keyed>
-          {(p) => (
-            <div class="modal">
-              <div class="ask">
-                <b>请求批准：{p.permission}</b>
-                <code>{p.patterns.slice(0, 6).join("\n")}</code>
-                <div class="row">
-                  <button onClick={() => void store.replyPermission(p.id, "reject")}>拒绝</button>
-                  <button onClick={() => void store.replyPermission(p.id, "always")}>总是允许</button>
-                  <button class="primary" onClick={() => void store.replyPermission(p.id, "once")}>
-                    本次允许
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </Show>
-        <Show when={question()} keyed>{(q) => <QuestionCard q={q} />}</Show>
         <Show when={renaming() && session()}>
           <Rename title={session()!.title} onClose={() => setRenaming(false)} />
         </Show>
         <Show when={diff()}>
           <DiffModal onClose={() => setDiff(false)} />
         </Show>
-        <Input draft={draft} setDraft={setDraft} submit={submit} staged={staged} setStaged={setStaged} add={add} />
+        <Show when={git()}>
+          <GitPanel
+            onClose={() => {
+              setGit(false)
+              void vcsRefresh()
+            }}
+          />
+        </Show>
+        <Input draft={draft} setDraft={setDraft} submit={submit} staged={staged} setStaged={setStaged} add={add} addRef={addRef} />
+        <Show when={term()}>
+          <Terminal onClose={() => setTerm(false)} />
+        </Show>
       </Show>
     </div>
   )
@@ -280,9 +346,8 @@ function QuestionCard(props: { q: Question }) {
   }
 
   return (
-    <div class="modal">
-      <div class="ask wide">
-        <For each={props.q.questions}>
+    <div class="ask-inline">
+      <For each={props.q.questions}>
           {(one, i) => (
             <>
               <b>{one.question}</b>
@@ -310,12 +375,11 @@ function QuestionCard(props: { q: Question }) {
             </>
           )}
         </For>
-        <div class="row">
-          <button onClick={() => void store.rejectQuestion(props.q.id)}>拒答</button>
-          <button class="primary" disabled={!ready()} onClick={done}>
-            提交
-          </button>
-        </div>
+      <div class="row">
+        <button onClick={() => void store.rejectQuestion(props.q.id)}>拒答</button>
+        <button class="primary" disabled={!ready()} onClick={done}>
+          提交
+        </button>
       </div>
     </div>
   )
@@ -328,9 +392,54 @@ function Input(props: {
   staged: () => Entry[]
   setStaged: (fn: (list: Entry[]) => Entry[]) => void
   add: (file: File) => Promise<void>
+  addRef: (path: string) => void
 }) {
+  const [mention, setMention] = createSignal<{ q: string; at: number } | null>(null)
+  const [hits, setHits] = createSignal<string[]>([])
+  const [pick, setPick] = createSignal(0)
+  let timer: ReturnType<typeof setTimeout>
+
+  function scan(el: HTMLTextAreaElement) {
+    const before = el.value.slice(0, el.selectionStart ?? el.value.length)
+    const m = /(?:^|\s)@([^\s@]*)$/.exec(before)
+    if (!m || !directory()) {
+      setMention(null)
+      return
+    }
+    setMention({ q: m[1], at: before.lastIndexOf("@") })
+    clearTimeout(timer)
+    timer = setTimeout(async () => {
+      const res = await client()
+        ?.v2.fs.find({ location: { directory: directory() }, query: m[1], type: "file", limit: "12" })
+        .catch(() => undefined)
+      setHits((res?.data?.data ?? []).map((x) => x.path))
+      setPick(0)
+    }, 150)
+  }
+
+  function choose(path: string) {
+    const me = mention()
+    if (!me) return
+    const v = props.draft()
+    props.setDraft(v.slice(0, me.at) + v.slice(me.at + me.q.length + 1))
+    props.addRef(path)
+    setMention(null)
+  }
+
   return (
     <div class="input">
+      <Show when={mention() && hits().length}>
+        <div class="mention">
+          <For each={hits()}>
+            {(h, i) => (
+              <button classList={{ on: i() === pick() }} onMouseEnter={() => setPick(i())} onClick={() => choose(h)}>
+                {h.split("/").slice(-2).join("/")}
+                <small>{h}</small>
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
       <Show when={props.staged().length}>
         <div class="chips">
           <For each={props.staged()}>
@@ -345,9 +454,12 @@ function Input(props: {
       </Show>
       <textarea
         rows={2}
-        placeholder="让 Kilo 做什么…（Enter 发送，Shift+Enter 换行，可粘贴图片/文件）"
+        placeholder="让 Kilo 做什么…（Enter 发送，Shift+Enter 换行，@ 引用文件，可粘贴图片/文件）"
         value={props.draft()}
-        onInput={(e) => props.setDraft(e.currentTarget.value)}
+        onInput={(e) => {
+          props.setDraft(e.currentTarget.value)
+          scan(e.currentTarget)
+        }}
         onPaste={(e) => {
           const files = e.clipboardData?.files
           if (!files || !files.length) return
@@ -355,6 +467,28 @@ function Input(props: {
           for (const f of files) void props.add(f)
         }}
         onKeyDown={(e) => {
+          if (mention()) {
+            if (e.key === "ArrowDown") {
+              e.preventDefault()
+              setPick((p) => (p + 1) % hits().length)
+              return
+            }
+            if (e.key === "ArrowUp") {
+              e.preventDefault()
+              setPick((p) => (p - 1 + hits().length) % hits().length)
+              return
+            }
+            if (e.key === "Enter" || e.key === "Tab") {
+              e.preventDefault()
+              const h = hits().at(pick())
+              if (h) choose(h)
+              return
+            }
+            if (e.key === "Escape") {
+              setMention(null)
+              return
+            }
+          }
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault()
             props.submit()
@@ -373,7 +507,7 @@ function Input(props: {
           <option value="auto">自动批准</option>
         </select>
         <label class="clip" title="添加文件/图片">
-          📎
+          <span>📎</span>
           <input
             type="file"
             multiple
@@ -385,6 +519,7 @@ function Input(props: {
           />
         </label>
         <span class="grow" />
+        <Usage />
         <Show
           when={!store.busy().has(store.current())}
           fallback={
@@ -399,6 +534,22 @@ function Input(props: {
         </Show>
       </div>
     </div>
+  )
+}
+
+function Usage() {
+  const n = () => {
+    const list = store.thread(store.current())
+    for (let i = list.length - 1; i >= 0; i--) {
+      const info = list[i].info
+      if (info.role === "assistant") return info.tokens.input + (info.tokens.cache.read ?? 0)
+    }
+    return 0
+  }
+  return (
+    <Show when={n() > 0}>
+      <span class="usage">{n() >= 1000 ? `${(n() / 1000).toFixed(1)}K` : n()}</span>
+    </Show>
   )
 }
 
@@ -506,6 +657,71 @@ function Message(props: { msg: Msg; edit: (m: Msg) => Promise<void>; retry: (m: 
   )
 }
 
+const TOOL_ICON: Record<string, string> = {
+  bash: ">_",
+  shell: ">_",
+  read: "≡",
+  edit: "✎",
+  write: "▤",
+  multiedit: "✎",
+  glob: "⌕",
+  grep: "⌕",
+  webfetch: "🌐",
+  websearch: "🌐",
+  task: "⧉",
+  todowrite: "☑",
+}
+
+function ToolCard(props: { part: Extract<Part, { type: "tool" }> }) {
+  const [open, setOpen] = createSignal(false)
+  const s = () => props.part.state
+  const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : "")
+  const summary = () => {
+    const st = s()
+    if ("title" in st && st.title) return st.title
+    const i = st.input as Record<string, unknown>
+    return str(i.command) || str(i.path) || str(i.filePath) || str(i.pattern) || str(i.url) || props.part.tool
+  }
+  const icon = () => TOOL_ICON[props.part.tool] ?? "⚙"
+  const status = () => {
+    const st = s()
+    if (st.status === "error") return <span class="tst bad">✗</span>
+    if (st.status === "completed") return <span class="tst ok">✓</span>
+    return <span class="tst run">◌</span>
+  }
+  const inputText = () => {
+    const i = s().input as Record<string, unknown>
+    if (typeof i.command === "string") return `$ ${i.command}`
+    return Object.entries(i)
+      .filter(([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean")
+      .map(([k, v]) => `${k}: ${str(v)}`)
+      .join("\n")
+  }
+  const output = () => {
+    const st = s()
+    if (st.status === "completed") return st.output ?? ""
+    if (st.status === "error") return st.error
+    return ""
+  }
+  return (
+    <div class="tcard">
+      <button class="trow" onClick={() => setOpen((v) => !v)} title={summary()}>
+        <span class="tic">{icon()}</span>
+        <span class="tcmd">{summary()}</span>
+        {status()}
+      </button>
+      <Show when={open()}>
+        <Show when={inputText()}>
+          <pre class="tinp">{inputText()}</pre>
+        </Show>
+        <Show when={output()}>
+          <pre class="tout">{output().slice(0, 20000)}</pre>
+        </Show>
+      </Show>
+    </div>
+  )
+}
+
 function PartView(props: { part: Part }) {
   return (
     <>
@@ -517,13 +733,12 @@ function PartView(props: { part: Part }) {
         </details>
       )}
       {props.part.type === "file" && <span class="chip file">{props.part.filename}</span>}
-      {props.part.type === "tool" && (
-        <div classList={{ tool: true, [props.part.state.status]: true }}>
-          <span class="name">{props.part.tool}</span>
-          <span class="tstate">{"title" in props.part.state ? (props.part.state.title ?? props.part.state.status) : props.part.state.status}</span>
-          {props.part.state.status === "error" && <pre class="terr">{props.part.state.error}</pre>}
+      {props.part.type === "step-finish" && (
+        <div class="step">
+          {props.part.time ? `运行状态已更新。 | ${Math.round((props.part.time.end - props.part.time.start) / 1000)}s` : "运行状态已更新。"}
         </div>
       )}
+      {props.part.type === "tool" && <ToolCard part={props.part} />}
     </>
   )
 }

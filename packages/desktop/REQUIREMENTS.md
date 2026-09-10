@@ -14,7 +14,7 @@
 | 1.2 | dev 注入仓库 CLI（`KILO_DESKTOP_BACKEND_CMD`） | ✅ | `script/dev.ts` |
 | 1.3 | release 走 externalBin sidecar（含 tree-sitter/ffmpeg/sandbox 资源） | ✅ | `script/sidecar.ts`，二进制已实测可服务 |
 | 1.4 | 文件夹选择（非阻塞）、外链打开、写 skill/agent 文件命令 | ✅ | `pick_dir`/`open_url`/`write_skill`/`write_agent`/`remove_mcp`；另有 `restart_backend`（附加参数/环境变量重启） |
-| 1.5 | 多窗口 / 托盘 / 深链（`kilo://` OAuth 回调） | ⬜ | OAuth localhost 回调当前靠轮询兜底 |
+| 1.5 | 多窗口 / 托盘 / 深链（`kilo://` OAuth 回调） | ❎ 不需要 | OAuth 回调由后端进程自身 localhost 监听接收（provider 插件 createServer），桌面端轮询 connected 已闭环；托盘/多窗口为可选项 |
 
 ## 2. 侧边栏（对照原型图 1）
 
@@ -44,16 +44,31 @@
 | 3.11 | 会话重命名、fork、share（复制链接）、revert/unrevert、todo 面板、diff 查看 | ✅ | 顶栏工具条 + diff 弹层（patch 展开） |
 | 3.12 | 文件/图片附件上传（prompt FilePart，data URL） | ✅ | 📎 选择器 + 粘贴；6MB 上限；用户气泡展示附件 chip |
 | 3.13 | 消息重试/编辑重发 | ✅ | 用户气泡 hover ↻/✎：`session.revert` 后重发/回填草稿；顶栏 ↩ 恢复 |
+| 3.14 | CodePilot 式对话渲染 | ✅ | 终端式工具卡（一行命令/路径 + ✓/✗/ 状态 + 点开看 input/output 深底块）、权限与 question **内联消息流**（不再模态）、step-finish「运行状态已更新 \| Xs」摘要、用户气泡浅灰化、输入框 token 用量、黑底发送/停止钮 |
+
+## 3b. CodePilot 对比差距（2026-09-10 源码分析，按优先级）
+
+| # | 功能 | 状态 | 后端依赖 |
+|---|---|---|---|
+| G1 | Git 面板：branch/变更列表/文件 diff/commit/push | ✅ | 顶栏「⎇ Git」开右侧抽屉：分支+变更数、文件列表（A/M/D 徽标 + 行数）、点开看 patch、commit（add -A + commit -m 经 Rust `git_cmd`）、push、刷新；非仓库空态 |
+| G2 | 输入框 @文件引用（fs.find 弹层 → FilePart file:// url） | ✅ | `@query` 触发 150ms 防抖弹层，↑↓/Tab/Enter/Esc 导航，选中转 `file://` 附件 chip |
+| G3 | 终端抽屉（xterm + WS） | ✅ | 顶栏「▴ 终端」开底部抽屉：`pty.create` → `connect-token` → `ws …/connect?ticket=`；裸帧协议（0x00 控制帧忽略），fit + resize 同步，关闭即 `pty.remove` |
+| G4 | 消息排队（运行中可继续输入） | ⬜ | 后端 session queue（EventSessionQueueChanged）已有，前端未接 |
+| G5 | 全局搜索 ⌘K（session/message/file 三 scope） | ⬜ | `GET /find`? 待查 `/api/search` 无对应，用 session list + v2.fs.find + 本地消息过滤兜底 |
+| G6 | 分屏双会话 | ⬜ | 纯前端布局 |
+| G7 | 回滚到检查点（任意轮文件回退） | ⬜ | `session.revert` 已有（3.13 复用），补文件回滚语义 |
+| G8 | 顶栏分支显示 + dirty 数 | ✅ | `⑂ branch ·N` 常驻顶栏（vcs.get + vcs.diff 计数），点击开 Git 面板，关闭即刷新 |
+| G9 | 定时任务 / IM Bridge / 生成式 UI / 媒体工作室 / 三引擎切换 | ❎ 不做 | CodePilot 私有体系（SQLite/自研 loop），kilo 后端无对应，超出桌面壳定位 |
 
 ## 4. 插件中心（对照原型图 2）
 
 | # | 功能 | 状态 | 说明 |
 |---|---|---|---|
 | 4.1 | 技能 / MCP / 命令行工具 三 tab + 搜索 + 卡片 | ✅ | ready 时序 bug 已修 |
-| 4.2 | 新建技能（写 `.kilo/skills/<name>.md`） | ✅ | |
+| 4.2 | 新建技能（写 `.kilo/skills/<name>/SKILL.md`） | ✅ | 修复：单文件 `<name>.md` 不被 `KILO_SKILL_PATTERN` 扫描，已改目录形态 |
 | 4.3 | 技能市场按钮（外链） | ✅ | → github.com/Kilo-Org/kilo-marketplace |
 | 4.4 | MCP 添加/连接/断开/删除（`/mcp` add/connect/disconnect） | ✅ | 本地 command/远程 URL 两种 config；needs_auth 走 connect 流程提示；删除经 `remove_mcp` 改写项目 `.kilo/config.json`（全局配置条目不在范围） |
-| 4.5 | 技能启停、来源分组（市场安装/插件提供） | ⬜ | 后端无启停 API，需写 config 覆写 |
+| 4.5 | 技能启停、来源分组（市场安装/插件提供/全局/项目） | ✅ | 启停 = `toggle_skill` 在技能目录与同级 `.disabled/` 间搬移（glob 不扫 dot 目录）+ `POST /instance/reload` 生效（会话运行中返回错误提示重试）；停用项折叠区可恢复，localStorage 记录 |
 
 ## 5. 素材库
 
@@ -89,10 +104,10 @@
 | # | 功能 | 状态 | 说明 |
 |---|---|---|---|
 | 8.1 | `tauri build --no-bundle` release 编译 | ✅ | 已验证 |
-| 8.2 | 完整 bundle（.app/.dmg）+ 图标 | 🔨 | 图标已生成；bundle 未跑通全流程（本轮 Rust 改动已在 Windows `cargo check`/`cargo build` 全绿复验） |
-| 8.3 | 代码签名 + 公证 | ⬜ | 需 Apple Developer 账号 |
+| 8.2 | 完整 bundle（.app/.dmg）+ 图标 | ✅ | macOS x64：`Kilo_0.1.0_x64.dmg`（113MB）产出；`Kilo.app/Contents/MacOS/` 内嵌 `kilo` sidecar，打包版无 env 注入自举运行冒烟通过 |
+| 8.3 | 代码签名 + 公证 | ⬜ | 需 Apple Developer 账号；当前产出未签名（本机可跑，分发需右键打开或去隔离） |
 | 8.4 | 自动更新（updater endpoint） | ⬜ | 需发布物托管 |
-| 8.5 | 双架构 universal 二进制 | ⬜ | CLI 需分别构建 arm64+x64 |
+| 8.5 | 双架构 universal 二进制 | ✅ 脚本 | `sidecar.ts --all-macos`：全 target 构建 + 拷 arm64/x64 双产物；实际出包需 Intel+ARM 各验一次 |
 | 8.6 | Windows/Linux target | 🔨 | sidecar 脚本 triple 映射已留；Windows dev 模式真机验证（完整对话链路可用）；bundle（MSI）未跑 |
 
 ## 9. 工程门禁
@@ -118,3 +133,5 @@
 12. Windows 下 tauri dev 的 vite 子进程可能静默退出（code 255）——此后页面 reload/HMR 全部失败，修复看似「不生效」；症状是界面停留在旧代码，处理是重启 `bun run dev` 并看日志。
 13. `button` 在 flex column 里不靠 stretch 撑满（webview UA 样式下会缩成内容宽）——列表项显式 `display:block; width:100%`。
 14. WebView2 默认字体栈缺 emoji 时 📁/📦 渲染成单色豆腐块：font-family 需含 `Segoe UI Emoji`。
+15. 技能扫描 pattern 是 `{skill,skills}/**/SKILL.md`——技能必须目录形态（`<name>/SKILL.md`），单文件 `<name>.md` 静默不加载；启停搬移依赖 glob 默认不扫 dot 目录（`.disabled/`）。
+16. `POST /instance/reload` 会重载 config/skills/agents/commands/MCP，会话运行中返回 409——启停后调用它替代重启后端。

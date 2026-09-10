@@ -21,6 +21,51 @@ const [creating, setCreating] = createSignal(false)
 const [name, setName] = createSignal("")
 const [desc, setDesc] = createSignal("")
 
+type Off = { name: string; location: string }
+const [off, setOff] = createSignal<Off[]>(JSON.parse(localStorage.getItem("skills-off") ?? "[]"))
+const [showOff, setShowOff] = createSignal(false)
+const saveOff = (list: Off[]) => {
+  localStorage.setItem("skills-off", JSON.stringify(list))
+  setOff(list)
+}
+
+// 来源按 location 路径归类；顺序对齐原型（市场安装/插件提供在前）。
+const GROUPS = ["市场安装", "插件提供", "全局", "项目"] as const
+function groupOf(loc: string) {
+  const p = loc.replace(/\\/g, "/")
+  if (p.includes("/.kilo/skill")) return "项目"
+  if (p.includes("/node_modules/")) return "插件提供"
+  if (p.includes("/cache/skills")) return "市场安装"
+  return "全局"
+}
+
+async function reloadBackend() {
+  const res = await client()!.instance.reload({ directory: directory() })
+  if (res.error) {
+    const e = res.error
+    store.notify(`重载失败：${"message" in e ? e.message : "name" in e ? e.name : "未知"}`)
+  }
+  reload()
+}
+
+async function disableSkill(s: { name: string; location: string }) {
+  const e = await invoke<void>("toggle_skill", { path: s.location, on: false }).catch((x: unknown) =>
+    x instanceof Error ? x.message : String(x),
+  )
+  if (e) return store.notify(`停用失败：${e}`)
+  saveOff([...off().filter((x) => x.name !== s.name), { name: s.name, location: s.location }])
+  await reloadBackend()
+}
+
+async function enableSkill(o: Off) {
+  const e = await invoke<void>("toggle_skill", { path: o.location, on: true }).catch((x: unknown) =>
+    x instanceof Error ? x.message : String(x),
+  )
+  if (e) return store.notify(`恢复失败：${e}`)
+  saveOff(off().filter((x) => x.location !== o.location))
+  await reloadBackend()
+}
+
 const [adding, setAdding] = createSignal(false)
 const [mname, setMName] = createSignal("")
 const [mremote, setMRemote] = createSignal(false)
@@ -77,6 +122,12 @@ async function rmMcp(name: string) {
 const filter = <T extends { name?: string; id?: string }>(list: T[]) =>
   list.filter((x) => (x.name ?? x.id ?? "").toLowerCase().includes(search().toLowerCase()))
 
+type Skill = { name: string; description?: string; location: string }
+const grouped = () => {
+  const list = filter((skills() ?? []) as Skill[])
+  return GROUPS.map((label) => ({ label, items: list.filter((s) => groupOf(s.location) === label) }))
+}
+
 export function Plugins() {
   return (
     <div class="page">
@@ -109,16 +160,49 @@ export function Plugins() {
             </div>
           </div>
         </Show>
-        <div class="grid">
-          <For each={filter((skills() ?? []) as { name: string; description?: string }[])}>
-            {(s) => (
-              <div class="card">
-                <b>/{s.name}</b>
-                <p>{s.description ?? ""}</p>
+        <For each={grouped()}>
+          {(g) => (
+            <Show when={g.items.length}>
+              <div class="label big">{g.label}</div>
+              <div class="grid">
+                <For each={g.items}>
+                  {(s) => (
+                    <div class="card">
+                      <b>/{s.name}</b>
+                      <p>{s.description ?? ""}</p>
+                      <div class="row">
+                        <button disabled={!directory()} onClick={() => void disableSkill(s)}>
+                          停用
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </For>
               </div>
-            )}
-          </For>
-        </div>
+            </Show>
+          )}
+        </For>
+        <Show when={off().length}>
+          <button class="linkish" onClick={() => setShowOff((v) => !v)}>
+            已停用（{off().length}）{showOff() ? " ▴" : " ▾"}
+          </button>
+          <Show when={showOff()}>
+            <div class="grid">
+              <For each={off()}>
+                {(o) => (
+                  <div class="card dimmed">
+                    <b>/{o.name}</b>
+                    <div class="row">
+                      <button class="primary" onClick={() => void enableSkill(o)}>
+                        启用
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </Show>
       </Show>
       <Show when={tab() === "mcp"}>
         <div class="row-end">

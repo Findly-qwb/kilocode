@@ -1,5 +1,5 @@
 // 打包 sidecar：复用 kilo-vscode 的 local-bin 产物（二进制 + tree-sitter/sandbox/ffmpeg 资源），
-// 复制成 tauri externalBin 命名。跑法：bun script/sidecar.ts [--force]
+// 复制成 tauri externalBin 命名。跑法：bun script/sidecar.ts [--force] [--all-macos]
 import { join } from "path"
 import {$} from "bun"
 
@@ -17,10 +17,20 @@ const triples: Record<string, string> = {
 const triple = triples[`${process.platform}-${process.arch}`] ?? "unknown-unknown"
 const exe = process.platform === "win32" ? ".exe" : ""
 
-await $`bun ${join(root, "packages/kilo-vscode/script/local-bin.ts")} ${process.argv.includes("--force") ? "--force" : ""}`.cwd(root)
 await $`mkdir -p ${out}`
-await $`cp ${join(vscodeBin, `kilo${exe}`)} ${join(out, `kilo-${triple}${exe}`)}`
-await $`chmod +x ${join(out, `kilo-${triple}${exe}`)}`
+if (process.argv.includes("--all-macos")) {
+  // 双架构：跑全 target CLI 构建（慢），拷两个 darwin 产物；资源文件跨平台共用。
+  await $`bun run script/build.ts --skip-install`.cwd(join(root, "packages", "opencode"))
+  const dist = join(root, "packages", "opencode", "dist", "@kilocode")
+  for (const [arch, t] of [["arm64", "aarch64-apple-darwin"], ["x64", "x86_64-apple-darwin"]]) {
+    await $`cp ${join(dist, `cli-darwin-${arch}`, "bin", "kilo")} ${join(out, `kilo-${t}`)}`
+    await $`chmod +x ${join(out, `kilo-${t}`)}`
+  }
+} else {
+  await $`bun ${join(root, "packages/kilo-vscode/script/local-bin.ts")} ${process.argv.includes("--force") ? "--force" : ""}`.cwd(root)
+  await $`cp ${join(vscodeBin, `kilo${exe}`)} ${join(out, `kilo-${triple}${exe}`)}`
+  await $`chmod +x ${join(out, `kilo-${triple}${exe}`)}`
+}
 for (const res of ["tree-sitter", "ffmpeg", "kilo-sandbox-mutation-worker.js"]) {
   await $`cp -R ${join(vscodeBin, res)} ${join(out, res)}`.nothrow()
 }

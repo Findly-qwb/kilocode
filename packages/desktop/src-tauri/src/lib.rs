@@ -96,10 +96,32 @@ fn open_url(app: AppHandle, url: String) -> Result<(), String> {
 #[tauri::command]
 fn write_skill(dir: String, name: String, desc: String) -> Result<(), String> {
     check_name(&name)?;
-    let root = std::path::Path::new(&dir).join(".kilo").join("skills");
+    // 后端扫描 pattern 是 {skill,skills}/**/SKILL.md，单文件 <name>.md 不会被识别。
+    let root = std::path::Path::new(&dir).join(".kilo").join("skills").join(&name);
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     let body = format!("---\nname: {name}\ndescription: {desc}\n---\n\n# {name}\n\n{desc}\n");
-    std::fs::write(root.join(format!("{name}.md")), body).map_err(|e| e.to_string())
+    std::fs::write(root.join("SKILL.md"), body).map_err(|e| e.to_string())
+}
+
+// 启停 = 在 skill 目录与同级 .disabled/ 间搬移（dot 目录不被 glob 扫描）。
+#[tauri::command]
+fn toggle_skill(path: String, on: bool) -> Result<(), String> {
+    let md = std::path::Path::new(&path);
+    let dir = md.parent().ok_or("bad skill path")?;
+    let name = dir.file_name().ok_or("bad skill name")?.to_string_lossy().into_owned();
+    check_name(&name)?;
+    if !dir.exists() {
+        return Err(if on { "已禁用副本缺失".into() } else { "技能目录不存在".into() });
+    }
+    let parent = dir.parent().ok_or("bad skill root")?;
+    let off = parent.join(".disabled");
+    if on {
+        std::fs::rename(off.join(&name), dir).map_err(|e| e.to_string())?;
+    } else {
+        std::fs::create_dir_all(&off).map_err(|e| e.to_string())?;
+        std::fs::rename(dir, off.join(&name)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -134,6 +156,22 @@ fn remove_mcp(dir: String, name: String) -> Result<(), String> {
     std::fs::write(&path, format!("{text}\n")).map_err(|e| e.to_string())
 }
 
+// Git 写操作后端无 API（/vcs 只读），桌面端直接跑 git CLI。program 固定，args 由前端给。
+#[tauri::command]
+async fn git_cmd(dir: String, args: Vec<String>) -> Result<String, String> {
+    // ponytail: std 阻塞跑在 tauri async 命令的 worker 线程上，git 操作短平，不占主线程
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&dir)
+        .args(&args)
+        .output()
+        .map_err(|e| format!("git 不可用：{e}"))?;
+    if out.status.success() {
+        return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
+    }
+    Err(String::from_utf8_lossy(&out.stderr).trim().into())
+}
+
 fn check_name(name: &str) -> Result<(), String> {
     if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
         return Err("名称只允许字母数字与 -_.".into());
@@ -153,7 +191,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            server_info, pick_dir, open_url, write_skill, write_agent, remove_mcp, restart_backend
+            server_info, pick_dir, open_url, write_skill, toggle_skill, write_agent, remove_mcp,
+            restart_backend, git_cmd
         ])
         .build(tauri::generate_context!())
         .expect("failed to build kilo-desktop")
