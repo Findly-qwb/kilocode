@@ -1,0 +1,1315 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kilo Desktop 原型 — 基于 kilo-vscode webview-ui 全功能映射</title>
+<style>
+:root{
+  --bg:#efefef; --panel:#fff; --line:#e4e4e7; --line2:#d8d8dc;
+  --text:#1c1c1f; --muted:#84848c; --faint:#b0b0b7;
+  --accent:#161618; --blue:#2f6fed; --green:#1a7f37; --red:#d23b3b; --orange:#c77701;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font:13.5px/1.55 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#d9d9db;color:var(--text);display:flex;align-items:center;justify-content:center;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit}
+::placeholder{color:var(--faint)}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#c5c5ca;border-radius:4px}
+
+.window{width:min(1480px,97vw);height:min(930px,95vh);background:var(--bg);border-radius:14px;box-shadow:0 24px 80px rgba(0,0,0,.28);display:flex;flex-direction:column;overflow:hidden;border:1px solid #c9c9cc}
+.titlebar{height:38px;display:flex;align-items:center;padding:0 14px;gap:12px;flex:none;border-bottom:1px solid var(--line);background:#f6f6f7}
+.lights{display:flex;gap:7px}.lights i{width:11px;height:11px;border-radius:50%}
+.titlebar .tt{font-weight:600}.titlebar .sub{color:var(--muted);font-size:12px}
+.titlebar .right{margin-left:auto;display:flex;gap:10px;align-items:center;color:var(--muted);font-size:12px}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
+.dot.g{background:var(--green)}.dot.r{background:var(--red)}.dot.o{background:var(--orange)}.dot.y{background:#d9a400}.dot.gr{background:#c2c2c7}
+
+.shell{flex:1;display:grid;grid-template-columns:252px minmax(0,1fr) 330px;min-height:0}
+.shell.no-right{grid-template-columns:252px minmax(0,1fr) 0}
+.shell.no-left{grid-template-columns:0 minmax(0,1fr) 330px}
+.shell.no-left.no-right{grid-template-columns:0 minmax(0,1fr) 0}
+.shell.no-left .sidebar{display:none}
+.shell.no-right .rightbar{display:none}
+.sidebar{grid-column:1}
+.center{grid-column:2}
+.rightbar{grid-column:3}
+
+.sidebar{background:#f4f4f5;border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.side-search{margin:12px 12px 6px;display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:7px 10px;color:var(--muted);font-size:12.5px;cursor:pointer}
+.nav{padding:2px 8px}
+.nav .item{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;color:var(--text);font-size:13px;width:100%;text-align:left}
+.nav .item:hover{background:#e9e9eb}
+.nav .item.active{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.07);font-weight:600}
+.nav .item .ic{width:16px;text-align:center;color:var(--muted);flex:none}
+.grp{margin:14px 14px 2px;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px;font-weight:600}
+.grp .edit{margin-left:auto;color:var(--faint)}
+.sesslist{flex:1;overflow:auto;padding:0 8px 8px}
+.sess{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;font-size:12.5px;color:#3c3c42;cursor:pointer}
+.sess:hover{background:#e9e9eb}
+.sess.active{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+.sess .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sess .time{margin-left:auto;color:var(--faint);font-size:11px;flex:none}
+.sess .act{display:none;margin-left:auto;gap:4px;flex:none}
+.sess:hover .act{display:flex}.sess:hover .time{display:none}
+.sess .act button{color:var(--muted);padding:1px 3px;border-radius:4px}.sess .act button:hover{background:#dcdce0;color:var(--text)}
+.dategroup{font-size:11px;color:var(--faint);padding:10px 10px 3px}
+.side-foot{border-top:1px solid var(--line);padding:8px;display:flex;flex-direction:column;gap:2px}
+.acct{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:8px;cursor:pointer}
+.acct:hover{background:#e9e9eb}
+.avatar{width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#5b6cff,#9b59ff);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none}
+.bal{margin-left:auto;background:#e8f5ec;color:var(--green);font-size:11px;border-radius:20px;padding:1px 8px;font-weight:600}
+
+.center{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg)}
+.viewwrap{flex:1;display:flex;min-height:0;background:var(--panel);border-top:1px solid var(--line)}
+.view{display:none;flex-direction:column;flex:1;min-width:0;min-height:0}
+.view.show{display:flex}
+
+.taskheader{flex:none;padding:12px 22px 8px;border-bottom:1px solid var(--line)}
+.th-row{display:flex;align-items:center;gap:10px}
+.th-title{font-size:16px;font-weight:700;letter-spacing:.2px}
+.th-title:focus{outline:2px solid var(--blue);border-radius:4px}
+.th-meta{margin-left:auto;display:flex;align-items:center;gap:6px}
+.pill{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);background:#f2f2f4;border:1px solid var(--line);border-radius:20px;padding:3px 10px;cursor:pointer;white-space:nowrap}
+.pill:hover{background:#e9e9ec}
+.pill b{color:var(--text);font-weight:600}
+.ctxbar{height:4px;border-radius:2px;background:#ececef;width:70px;overflow:hidden}
+.ctxbar i{display:block;height:100%;background:var(--blue);width:34%}
+.timeline{display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px}
+.timeline.open{display:block}
+.tl-bars{display:flex;align-items:flex-end;gap:3px;height:34px}
+.tl-bars span{width:9px;border-radius:2px 2px 0 0;background:#c9d6ff}
+.tl-bars span.tool{background:#bfe6cc}.tl-bars span.err{background:#f3c2c2}
+.tl-legend{display:flex;gap:16px;font-size:11px;color:var(--muted);margin-top:6px;align-items:center;flex-wrap:wrap}
+.tl-legend b{color:var(--text)}
+.ctxprog{display:flex;height:8px;border-radius:4px;overflow:hidden;margin:8px 0 4px;border:1px solid var(--line)}
+.ctxprog i:nth-child(1){background:var(--blue)}.ctxprog i:nth-child(2){background:#a8c2ff}.ctxprog i:nth-child(3){background:#ececef}
+.usage-table{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:6px}
+.usage-table th,.usage-table td{text-align:right;padding:3px 8px;border-bottom:1px solid #f0f0f2}
+.usage-table th{color:var(--muted);font-weight:500}.usage-table td:first-child,.usage-table th:first-child{text-align:left}
+
+.messages{flex:1;min-height:0;overflow:auto;padding:18px 22px 6px;position:relative;scroll-behavior:smooth}
+.msg{max-width:760px;margin:0 auto 18px}
+.msg.user .bubble{background:#f1f1f3;border:1px solid var(--line);border-radius:14px;padding:10px 14px;white-space:pre-wrap}
+.msg.user .meta{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);margin-bottom:4px;justify-content:flex-end}
+.chip{display:inline-flex;align-items:center;gap:4px;background:#e7efff;color:#2a58b8;border-radius:6px;padding:0 6px;font-size:12px;font-family:var(--mono)}
+.chip.file{cursor:pointer}.chip.file:hover{background:#d8e5ff}
+.attach{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.thumb{width:56px;height:56px;border-radius:8px;border:1px solid var(--line);background:linear-gradient(135deg,#ffe9c7,#c7e6ff);display:flex;align-items:center;justify-content:center;font-size:18px;position:relative;cursor:zoom-in}
+.thumb .rm{position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:50%;background:#333;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center}
+.msg .hoveract{opacity:0;display:flex;gap:4px;justify-content:flex-end;margin-top:4px;transition:.12s}
+.msg.user:hover .hoveract{opacity:1}
+.hoveract button{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 7px;background:#fff}
+.hoveract button:hover{color:var(--text);background:#f4f4f6}
+.msg.ai .role{font-size:11px;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.msg.ai .role .logo{width:18px;height:18px;border-radius:5px;background:conic-gradient(from 45deg,#1c1c1f,#55555c,#1c1c1f);display:inline-flex;align-items:center;justify-content:center;overflow:hidden;flex:none}
+.msg.ai .role .logo img{width:15px;height:15px;object-fit:contain}
+.md p{margin:0 0 10px}.md h3{font-size:14.5px;margin:14px 0 6px}.md ul,.md ol{margin:0 0 10px 20px}
+.md code.inline{background:#f0f0f2;border:1px solid var(--line);border-radius:5px;padding:0 5px;font-family:var(--mono);font-size:12px}
+.md a{color:var(--blue);text-decoration:none}.md a:hover{text-decoration:underline}
+.md .filelink{color:var(--blue);font-family:var(--mono);font-size:12px;border-bottom:1px dashed #9db9f5;cursor:pointer}
+.codeblock{border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:0 0 12px;background:#fafafa}
+.codeblock .cbhead{display:flex;align-items:center;padding:5px 10px;background:#f1f1f3;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted)}
+.codeblock .cbhead .lang{font-family:var(--mono)}
+.codeblock .cbhead .cp{margin-left:auto;display:flex;gap:4px}
+.codeblock .cbhead button{color:var(--muted);font-size:11px;border:1px solid var(--line);border-radius:5px;padding:1px 7px;background:#fff}
+.codeblock pre{padding:10px 12px;overflow:auto;font-family:var(--mono);font-size:12px;line-height:1.65}
+.tk{color:#a626a4}.ts{color:#0b7285}.tn{color:#986801}.tc{color:#a0a1a7;font-style:italic}.tf{color:#4078f2}.tt2{color:#c2410c}
+.think{border:1px solid var(--line);border-radius:10px;margin:0 0 12px;background:#fbfbfc;overflow:hidden}
+.think summary{cursor:pointer;padding:7px 12px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px;list-style:none}
+.think summary::-webkit-details-marker{display:none}
+.think .body{padding:4px 14px 12px;font-size:12.5px;color:#5c5c64;border-top:1px dashed var(--line)}
+.tool{border:1px solid var(--line);border-radius:10px;margin:0 0 12px;background:#fff;overflow:hidden}
+.tool .thead{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;font-size:12.5px}
+.tool .thead:hover{background:#fafafb}
+.tool .tname{font-weight:600}
+.tool .tsub{color:var(--muted);font-family:var(--mono);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tool .tstat{margin-left:auto;font-size:11px;color:var(--muted);display:flex;gap:6px;align-items:center;flex:none}
+.tool .tbody{border-top:1px solid #f0f0f2;padding:8px 12px;font-size:12px}
+.tool .tbody pre{font-family:var(--mono);font-size:11.5px;background:#f7f7f9;border:1px solid var(--line);border-radius:7px;padding:7px 9px;overflow:auto;white-space:pre-wrap}
+.tool .tbody pre.cmd{background:#191a1d;color:#d7dae0;border:none}
+.tool .tbody pre.cmd .p{color:#7ee787}
+.diff{font-family:var(--mono);font-size:11.5px;line-height:1.6}
+.diff .add{background:#e6ffec;color:#1a5c2a;display:block}
+.diff .del{background:#ffebe9;color:#9b1c1c;display:block}
+.diff .ctx{color:var(--muted);display:block}
+.diff .hh{background:#f0f4ff;color:#3b5bdb;display:block}
+.stat{display:inline-flex;gap:6px;font-size:11px;font-family:var(--mono)}
+.stat .a{color:var(--green)}.stat .d{color:var(--red)}
+.badge{font-size:10.5px;border-radius:5px;padding:1px 6px;font-weight:600;white-space:nowrap}
+.badge.ok{background:#e6f4ea;color:var(--green)}.badge.err{background:#fdecec;color:var(--red)}
+.badge.run{background:#e7efff;color:var(--blue)}.badge.warn{background:#fdf3e0;color:var(--orange)}
+.badge.gray{background:#efefef;color:#6b6b73}
+.todo{list-style:none;font-size:12.5px}
+.todo li{display:flex;gap:8px;padding:2.5px 0;color:#45454c}
+.todo li .cb{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--line2);flex:none;margin-top:2px;display:flex;align-items:center;justify-content:center;font-size:10px;background:#fff}
+.todo li.done{color:var(--muted);text-decoration:line-through}
+.todo li.done .cb{background:var(--green);border-color:var(--green);color:#fff}
+.outcome{border:1px solid var(--line);border-radius:10px;padding:9px 13px;font-size:12px;color:#4a4a52;display:flex;gap:10px;align-items:center;background:#fafafb}
+.cursor{display:inline-block;width:7px;height:15px;background:var(--text);vertical-align:-2px;animation:blink 1s steps(1) infinite;border-radius:1px}
+@keyframes blink{50%{opacity:0}}
+.working{max-width:760px;margin:0 auto 12px;display:none;align-items:center;gap:10px;font-size:12.5px;color:var(--muted)}
+.working.show{display:flex}
+.spinner{width:14px;height:14px;border:2px solid #d5d5da;border-top-color:var(--text);border-radius:50%;animation:spin .8s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.working .elapsed{font-family:var(--mono);font-size:11px}
+.permdock{max-width:760px;margin:0 auto 12px;border:1.5px solid #e8b26a;background:#fffaf0;border-radius:12px;padding:12px 14px;box-shadow:0 4px 18px rgba(180,120,20,.12)}
+.permdock .ph{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;margin-bottom:6px}
+.permdock .ph .ic{color:var(--orange)}
+.permdock .hint{font-size:12px;color:#7a6a4d;margin-bottom:8px}
+.permdock .rules{border:1px dashed #e3cfa5;border-radius:8px;padding:6px 10px;margin:8px 0;font-size:11.5px;color:#6d5c3e}
+.permdock .rules label{display:flex;align-items:center;gap:8px;padding:2px 0}
+.permdock .pactions{display:flex;gap:8px;align-items:center}
+.btn{border-radius:8px;padding:6px 14px;font-size:12.5px;font-weight:600;border:1px solid var(--line2);background:#fff}
+.btn:hover{background:#f4f4f6}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.primary:hover{background:#333360}
+.btn.danger{color:var(--red);border-color:#e5b9b9}
+.btn.danger:hover{background:#fdf1f1}
+.btn.sm{padding:3px 9px;font-size:11.5px;border-radius:6px}
+.kbd{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line2);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:#fff;color:var(--muted)}
+.qdock{max-width:760px;margin:0 auto 12px;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 4px 18px rgba(0,0,0,.06);padding:12px 14px}
+.qdock .qh{display:flex;align-items:center;font-size:12px;color:var(--muted);margin-bottom:8px}
+.qdock .qh b{color:var(--text);margin-right:auto}
+.qdock .q{font-size:13px;font-weight:600;margin-bottom:8px}
+.qopt{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line);border-radius:9px;padding:8px 11px;margin-bottom:6px;cursor:pointer}
+.qopt:hover{border-color:#b9c6e8;background:#fafbff}
+.qopt.sel{border-color:var(--blue);background:#f2f6ff}
+.qopt .mk{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--line2);flex:none;margin-top:1px}
+.qopt.sel .mk{border:4px solid var(--blue)}
+.qopt .d{font-size:11.5px;color:var(--muted)}
+.qdock .qfoot{display:flex;gap:8px;margin-top:10px;align-items:center}
+.queued{max-width:760px;margin:0 auto 10px;border:1px dashed var(--line2);border-radius:10px;padding:7px 12px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px;background:#fafafb}
+.queued .qtag{font-size:10.5px;background:#e7efff;color:var(--blue);border-radius:5px;padding:1px 6px;font-weight:600;animation:pulse 1.4s infinite}
+@keyframes pulse{50%{opacity:.55}}
+
+.inputzone{flex:none;padding:6px 22px 14px;position:relative}
+.dockrow{max-width:760px;margin:0 auto 8px;display:flex;align-items:center;gap:8px;min-height:26px}
+.newbtn{display:flex;align-items:center;gap:6px;border:1px solid var(--line2);background:#fff;border-radius:8px;padding:4px 12px;font-size:12px;font-weight:600}
+.newbtn:hover{background:#f6f6f8}
+.iconbtn{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;border:1px solid transparent}
+.iconbtn:hover{background:#ececee;color:var(--text)}
+.promptbox{max-width:760px;margin:0 auto;border:1px solid var(--line2);border-radius:16px;background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.07);position:relative;transition:.15s}
+.promptbox.focus{border-color:#8fb0f0;box-shadow:0 6px 24px rgba(47,111,237,.12)}
+.promptbox.dragover{border:2px dashed var(--blue);background:#f7faff}
+.pimgs{display:flex;gap:8px;padding:10px 12px 0;flex-wrap:wrap}
+.pimgs .thumb{width:48px;height:48px}
+.ptext{width:100%;border:none;outline:none;resize:none;padding:11px 14px 4px;font-size:13.5px;line-height:1.55;max-height:200px;background:transparent;display:block}
+.pbar{display:flex;align-items:center;gap:6px;padding:6px 8px 8px 10px;flex-wrap:wrap}
+.selector{display:flex;align-items:center;gap:5px;border-radius:8px;padding:4px 9px;font-size:12px;color:#3f3f46;border:1px solid transparent}
+.selector:hover{background:#f1f1f3;border-color:var(--line)}
+.selector .v{font-weight:600}
+.selector .caret{color:var(--faint);font-size:9px}
+.pbar .spacer{flex:1}
+.sendbtn{width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;flex:none;border:none}
+.sendbtn:disabled{background:#c9c9ce;cursor:not-allowed}
+.sendbtn.stop{background:#fff;color:var(--text);border:1.5px solid var(--text)}
+.sendbtn.stop .sq{width:11px;height:11px;background:var(--text);border-radius:2.5px}
+.hintline{max-width:760px;margin:6px auto 0;font-size:11px;color:var(--faint);display:flex;gap:14px;align-items:center}
+.hero{display:none;text-align:center;margin:0 auto 20px}
+.hero .hero-logo{width:96px;height:96px;object-fit:contain;filter:drop-shadow(0 10px 30px rgba(47,111,237,.22))}
+.hero h2{font-size:24px;margin:8px 0 4px}
+.hero p{color:var(--muted);font-size:13px}
+.chips{display:none;justify-content:center;gap:8px;margin:16px auto 0;max-width:760px;flex-wrap:wrap}
+.chips button{border:1px solid var(--line2);background:#fff;border-radius:20px;padding:6px 14px;font-size:12px;color:#45454c}
+.chips button:hover{border-color:var(--blue);color:var(--blue)}
+#view-chat.welcome .taskheader,#view-chat.welcome .messages,#view-chat.welcome .tobottom,#view-chat.welcome .dockrow{display:none}
+#view-chat.welcome .inputzone{flex:1;display:flex;flex-direction:column;justify-content:center;padding-bottom:60px}
+#view-chat.welcome .hero{display:block}
+#view-chat.welcome .chips{display:flex}
+#view-chat.welcome .promptbox{max-width:720px}
+#view-chat.welcome .ptext{min-height:110px;font-size:15px;padding:16px 18px 4px}
+.popmenu{position:absolute;bottom:calc(100% + 6px);left:10px;right:10px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.14);max-height:300px;overflow:auto;display:none;z-index:40;padding:5px}
+.popmenu.show{display:block}
+.popmenu .pm-head{font-size:10.5px;color:var(--faint);padding:6px 10px 3px;font-weight:700;letter-spacing:.4px}
+.pm-item{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;font-size:12.5px;cursor:pointer}
+.pm-item:hover,.pm-item.hl{background:#f2f4f8}
+.pm-item .cmd{font-family:var(--mono);font-weight:600;color:var(--text);flex:none}
+.pm-item .desc{color:var(--muted);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pm-item .kbd{margin-left:auto;flex:none}
+.pm-item .ic{width:16px;text-align:center;color:var(--muted);flex:none}
+.pm-item .g{margin-left:auto;font-size:10.5px;color:var(--faint)}
+.modelpop{position:absolute;bottom:calc(100% + 8px);left:0;width:640px;max-width:92vw;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 48px rgba(0,0,0,.18);display:none;z-index:60;overflow:hidden}
+.modelpop.show{display:flex}
+.mp-left{flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--line)}
+.mp-search{padding:10px;border-bottom:1px solid var(--line)}
+.mp-search input{width:100%;border:1px solid var(--line2);border-radius:8px;padding:7px 10px;outline:none;font-size:12.5px}
+.mp-list{overflow:auto;max-height:380px;padding:6px}
+.mp-group{font-size:10.5px;color:var(--faint);font-weight:700;padding:8px 10px 3px;display:flex;align-items:center;gap:6px}
+.mp-row{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:8px;cursor:pointer;font-size:12.5px}
+.mp-row:hover{background:#f2f4f8}.mp-row.sel{background:#eef3ff}
+.mp-row .star{margin-left:auto;color:#d9d9de;font-size:13px;flex:none}
+.mp-row .star.on{color:#e8a400}
+.mp-row .tags{margin-left:auto;display:flex;gap:4px;align-items:center;flex:none}
+.mp-row .free{font-size:10px;background:#e6f4ea;color:var(--green);border-radius:4px;padding:0 5px}
+.mp-row .price{font-size:10.5px;color:var(--faint);font-family:var(--mono)}
+.mp-right{width:250px;flex:none;padding:12px;overflow:auto;max-height:478px}
+.mp-right h4{font-size:13px;display:flex;align-items:center;gap:6px}
+.mp-right .prov{font-size:11px;color:var(--muted);margin:2px 0 8px}
+.mp-right .pr{display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:1px solid #f2f2f4;color:#55555c}
+.mp-right .pr b{font-family:var(--mono)}
+.mp-right .kv{font-size:11px;color:var(--muted);margin:8px 0 2px}
+.mp-right .kv b{color:var(--text);font-family:var(--mono)}
+.mp-right .cap{display:flex;gap:4px;flex-wrap:wrap;margin:6px 0}
+.mp-right .desc{font-size:11px;color:var(--muted);margin-top:8px}
+.shieldpop{position:absolute;bottom:calc(100% + 8px);left:0;width:330px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.16);display:none;z-index:60;padding:8px}
+.shieldpop.show{display:block}
+.sh-row{display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:12.5px;border-radius:7px}
+.sh-row:hover{background:#f6f6f8}
+.sh-row .lbl{flex:1}
+.lvl{font-size:11px;border-radius:5px;padding:1px 7px}
+.lvl.allow{background:#e6f4ea;color:var(--green)}.lvl.ask{background:#fdf3e0;color:var(--orange)}.lvl.deny{background:#fdecec;color:var(--red)}
+.sh-foot{border-top:1px solid var(--line);margin-top:6px;padding:8px;display:flex;justify-content:space-between;align-items:center;font-size:12px}
+.switch{width:34px;height:20px;border-radius:12px;background:#d7d7dd;position:relative;cursor:pointer;flex:none;transition:.15s}
+.switch i{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:.15s}
+.switch.on{background:var(--green)}.switch.on i{left:16px}
+.switch.sm{width:28px;height:16px}.switch.sm i{width:12px;height:12px}.switch.sm.on i{left:14px}
+.tobottom{position:absolute;right:26px;bottom:170px;width:30px;height:30px;border-radius:50%;background:#fff;border:1px solid var(--line2);box-shadow:0 4px 12px rgba(0,0,0,.12);display:none;align-items:center;justify-content:center;z-index:20;cursor:pointer}
+.rail{position:absolute;right:8px;top:14px;bottom:14px;width:14px;display:flex;flex-direction:column;gap:6px;align-items:center;padding-top:6px}
+.rail i{width:14px;height:3px;border-radius:2px;background:#dcdce0;cursor:pointer}
+.rail i.cur{background:var(--text)}
+.rail i:hover{background:var(--blue)}
+
+.rightbar{border-left:1px solid var(--line);background:#f6f6f7;display:flex;flex-direction:column;min-height:0}
+.rb-head{display:flex;align-items:center;padding:10px 12px;gap:8px;border-bottom:1px solid var(--line);flex:none}
+.rb-head .ttl{font-weight:700;font-size:13px}
+.rb-head .close{margin-left:auto}
+.rb-body{flex:1;overflow:auto;padding:14px}
+.modcard{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;display:flex;gap:12px;align-items:flex-start}
+.modcard:hover{border-color:#c3c9d8;box-shadow:0 3px 12px rgba(0,0,0,.05)}
+.modcard .ic{width:34px;height:34px;border-radius:9px;background:#f1f1f4;display:flex;align-items:center;justify-content:center;font-size:16px;flex:none;color:#5c5c64}
+.modcard h4{font-size:13px}.modcard p{font-size:11.5px;color:var(--muted);margin-top:2px}
+.rb-hint{text-align:center;margin-bottom:12px}
+.rb-hint h3{font-size:14px}.rb-hint p{font-size:11.5px;color:var(--muted);margin-top:3px}
+.tree{font-size:12px;font-family:var(--mono)}
+.tree .n{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:6px;cursor:pointer;color:#45454c;white-space:nowrap}
+.tree .n:hover{background:#ececef}
+.tree .n.sel{background:#e3ecff;color:#2a58b8}
+.tree .n .tw{width:10px;color:var(--faint);font-size:9px;flex:none}
+.tree .ind{padding-left:14px}
+.fileview{border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:10px;background:#fff}
+.fileview .fvh{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f7f7f9;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted)}
+.fileview .fvh b{color:var(--text);font-family:var(--mono)}
+.fileview pre{padding:10px;font-family:var(--mono);font-size:11px;line-height:1.6;max-height:300px;overflow:auto}
+.grow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;font-size:12px;font-family:var(--mono);cursor:pointer}
+.grow:hover{background:#ececef}
+.gbadge{width:16px;height:16px;border-radius:4px;font-size:9.5px;font-weight:800;display:flex;align-items:center;justify-content:center;flex:none;color:#fff}
+.gbadge.M{background:#c77701}.gbadge.A{background:var(--green)}.gbadge.D{background:var(--red)}
+.commitbox{width:100%;border:1px solid var(--line2);border-radius:9px;padding:8px;font-size:12px;outline:none;resize:none;height:56px;background:#fff}
+.urlbar{display:flex;gap:6px;margin-bottom:10px}
+.urlbar input{flex:1;border:1px solid var(--line2);border-radius:8px;padding:6px 10px;font-size:12px;outline:none;background:#fff}
+.fakepage{border:1px solid var(--line);border-radius:10px;background:#fff;height:280px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--faint);gap:8px;font-size:12px}
+.ucard{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+.ucard h5{font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.ucard .big{font-size:20px;font-weight:800;font-family:var(--mono)}
+.ucard .sub{font-size:11px;color:var(--muted)}
+.meter{height:7px;background:#ececef;border-radius:4px;overflow:hidden;margin:8px 0 4px}
+.meter i{display:block;height:100%;background:var(--blue)}
+.meter i.warn{background:var(--orange)}
+
+.page{padding:26px 34px;overflow:auto;flex:1}
+.page h2{font-size:19px;margin-bottom:4px}
+.page .lead{color:var(--muted);font-size:12.5px;margin-bottom:18px}
+.htabs{display:flex;gap:4px;background:#ececee;border-radius:9px;padding:3px;width:max-content;margin-bottom:14px}
+.htab{padding:5px 16px;border-radius:7px;font-size:12.5px;color:var(--muted);cursor:pointer}
+.htab.active{background:#fff;color:var(--text);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.hsearch{display:flex;gap:8px;align-items:center;margin-bottom:14px}
+.hsearch input{flex:1;max-width:420px;border:1px solid var(--line2);border-radius:9px;padding:8px 12px;outline:none;background:#fff;font-size:12.5px}
+.hrow{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:#fff;border-radius:10px;padding:10px 14px;margin-bottom:8px;cursor:pointer}
+.hrow:hover{border-color:#c3c9d8}
+.hrow .t{font-weight:600;font-size:13px}
+.hrow .m{font-size:11px;color:var(--muted);margin-top:1px;display:flex;gap:10px}
+.hrow .r{margin-left:auto;display:flex;gap:6px;align-items:center;color:var(--faint);font-size:11px;flex:none}
+.hrow .r button{opacity:0;color:var(--muted);padding:2px 5px;border-radius:5px}
+.hrow:hover .r button{opacity:1}
+.hrow .r button:hover{background:#f0f0f3;color:var(--text)}
+.settings{display:flex;flex:1;min-height:0;position:relative}
+.set-nav{width:190px;flex:none;border-right:1px solid var(--line);padding:14px 8px;overflow:auto;background:#fafafb}
+.set-nav button{display:block;width:100%;text-align:left;padding:7px 12px;border-radius:8px;font-size:12.5px;color:#4a4a52;margin-bottom:1px}
+.set-nav button:hover{background:#efeff2}
+.set-nav button.active{background:var(--accent);color:#fff;font-weight:600}
+.set-body{flex:1;overflow:auto;padding:22px 28px 90px}
+.set-body h3{font-size:16px;margin-bottom:2px}
+.set-body .slead{color:var(--muted);font-size:12px;margin-bottom:16px}
+.sgroup{border:1px solid var(--line);border-radius:12px;background:#fff;margin-bottom:14px;overflow:hidden}
+.sgroup>.gh{padding:10px 16px;font-weight:700;font-size:12.5px;background:#fafafb;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.srow{display:flex;align-items:center;gap:14px;padding:11px 16px;border-bottom:1px solid #f1f1f3}
+.srow:last-child{border-bottom:none}
+.srow .l{flex:1;min-width:0}
+.srow .l .n{font-size:13px;font-weight:600}
+.srow .l .d{font-size:11.5px;color:var(--muted);margin-top:1px}
+.srow .c{flex:none;display:flex;align-items:center;gap:8px}
+.sel{border:1px solid var(--line2);border-radius:8px;padding:5px 9px;font-size:12px;background:#fff;outline:none;min-width:150px}
+.tinp{border:1px solid var(--line2);border-radius:8px;padding:5px 9px;font-size:12px;outline:none;width:220px;background:#fff}
+.tinp.mono{font-family:var(--mono);font-size:11.5px}
+.rng{width:150px}
+.taglist{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tag{display:inline-flex;align-items:center;gap:5px;background:#f1f1f4;border:1px solid var(--line);border-radius:7px;padding:2px 8px;font-size:11.5px;font-family:var(--mono)}
+.tag .x{color:var(--faint);cursor:pointer}.tag .x:hover{color:var(--red)}
+.addrow{display:flex;gap:6px}
+.subtabs{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--line);padding-bottom:10px;flex-wrap:wrap}
+.subtab{padding:5px 14px;border-radius:20px;font-size:12.5px;color:var(--muted);cursor:pointer;border:1px solid transparent}
+.subtab.active{background:var(--accent);color:#fff;font-weight:600}
+.picon{width:26px;height:26px;border-radius:7px;background:#f1f1f4;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex:none;font-family:var(--mono)}
+.savebar{position:absolute;left:190px;right:0;bottom:0;padding:12px 28px;background:#fffdf2;border-top:1px solid #eadfa8;display:flex;align-items:center;gap:10px;font-size:12.5px;z-index:5}
+.savebar .sp{flex:1}
+.perm-rule{display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid #f1f1f3}
+.perm-rule .pl{flex:1}.perm-rule .pl .n{font-size:12.5px;font-weight:600}
+.perm-rule .pl .d{font-size:11px;color:var(--muted)}
+.exc{margin:4px 16px 10px 16px;padding:8px 10px;background:#fafafb;border:1px dashed var(--line);border-radius:8px;font-size:11.5px}
+.exc .er{display:flex;align-items:center;gap:8px;padding:2.5px 0;font-family:var(--mono)}
+select.tri{border:1px solid var(--line2);border-radius:6px;padding:2px 6px;font-size:11.5px;background:#fff}
+.pcard{border:1px solid var(--line);background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;max-width:640px}
+.pcard h4{font-size:13px;margin-bottom:10px}
+.devauth{border:1px solid var(--line);border-radius:12px;padding:16px;background:#fafafb}
+.devauth .step{font-size:11px;color:var(--muted);margin-bottom:4px;font-weight:700}
+.devauth .url{display:flex;gap:8px;align-items:center;font-family:var(--mono);font-size:12px;background:#fff;border:1px solid var(--line2);border-radius:8px;padding:7px 10px;margin-bottom:12px}
+.devauth .code{font-size:26px;font-weight:800;letter-spacing:8px;font-family:var(--mono);background:#fff;border:1px solid var(--line2);border-radius:10px;padding:10px;text-align:center;cursor:pointer}
+
+.overlay{position:fixed;inset:0;background:rgba(20,20,24,.42);display:none;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(2px)}
+.overlay.show{display:flex}
+.modal{background:#fff;border-radius:16px;width:560px;max-width:94vw;max-height:86vh;overflow:auto;box-shadow:0 30px 80px rgba(0,0,0,.35);display:none}
+.modal.wide{width:760px}
+.mhead{display:flex;align-items:center;padding:16px 20px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:2}
+.mhead h3{font-size:15px}.mhead .x{margin-left:auto;color:var(--muted);font-size:16px;padding:2px 6px;border-radius:6px}
+.mhead .x:hover{background:#f0f0f3}
+.mbody{padding:18px 20px}
+.mfoot{display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;border-top:1px solid var(--line);position:sticky;bottom:0;background:#fff}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;font-weight:600;margin-bottom:5px}
+.field label .opt{color:var(--faint);font-weight:400}
+.field .hint{font-size:11px;color:var(--muted);margin-top:4px}
+.field input,.field textarea,.field select{width:100%;border:1px solid var(--line2);border-radius:9px;padding:8px 11px;font-size:12.5px;outline:none;background:#fff}
+.field input:focus,.field textarea:focus{border-color:var(--blue)}
+.field textarea{font-family:var(--mono);font-size:11.5px;min-height:70px}
+.mcard{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;background:#fafafb}
+.mcard .mc-grid{display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end}
+.mcard .mc-grid input{width:100%;border:1px solid var(--line2);border-radius:7px;padding:5px 8px;font-size:11.5px}
+.mcard .mc-grid label{font-size:10.5px;color:var(--muted);display:block;margin-bottom:3px}
+.mcard .cbs{display:flex;gap:10px;font-size:11px;align-items:center;padding-bottom:4px}
+.auth-method{display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:11px 14px;margin-bottom:8px;cursor:pointer}
+.auth-method:hover{border-color:var(--blue);background:#f7faff}
+.auth-method .ic{font-size:16px}.auth-method b{font-size:12.5px}.auth-method span{font-size:11px;color:var(--muted)}
+.notice{border-radius:9px;padding:9px 12px;font-size:11.5px;margin-bottom:12px}
+.notice.info{background:#eef3ff;border:1px solid #cddcfb;color:#2a58b8}
+.notice.warn{background:#fff8e6;border:1px solid #eadfa8;color:#7a6a4d}
+.pullrow{display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:6px;font-size:12px;background:#fff}
+.pullrow input[type=checkbox]{width:auto}
+.toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(80px);background:#232326;color:#fff;font-size:12.5px;border-radius:10px;padding:10px 18px;box-shadow:0 10px 30px rgba(0,0,0,.3);transition:.25s;z-index:200;opacity:0}
+.toast.show{transform:translateX(-50%);opacity:1}
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+    <img src="logo.png" alt="" style="width:18px;height:18px;object-fit:contain">
+    <span class="tt">Kilo</span>
+    <span class="sub" id="crumb">New Chat · opencode</span>
+    <div class="right">
+      <span>⑂ dev · 1</span>
+      <span class="dot g" title="CLI 服务器已连接"></span>
+      <button class="iconbtn" title="收起/展开左栏" onclick="toggleLeft()">◧</button>
+      <button class="iconbtn" title="收起/展开右栏" onclick="toggleRight()">◨</button>
+    </div>
+  </div>
+
+  <div class="shell" id="shell">
+    <aside class="sidebar">
+      <div class="side-search" onclick="go('history')">🔍 搜索会话… <span style="margin-left:auto" class="kbd">⌘K</span></div>
+      <nav class="nav">
+        <button class="item active" data-nav="chat" onclick="newChat()"><span class="ic">💬</span>新对话</button>
+        <button class="item" data-nav="market" onclick="openModal('market')"><span class="ic">🧩</span>插件 / 市场</button>
+      </nav>
+      <div class="grp">项目 ▾ <span class="edit">✎</span></div>
+      <div class="nav">
+        <button class="item" onclick="toast('新建项目：选择目录 → 初始化 kilo.json')"><span class="ic">📁</span>新建项目</button>
+        <button class="item" style="font-weight:600"><span class="ic">📂</span>opencode</button>
+      </div>
+      <div class="sesslist" id="sessList"></div>
+      <div class="grp">助理 ▾ <span class="edit">✎</span></div>
+      <div class="sesslist" style="flex:none;max-height:110px">
+        <div class="sess"><span class="dot g"></span><span class="t">explore（子代理）</span><span class="time">运行中</span></div>
+        <div class="sess"><span class="dot gr"></span><span class="t">general（子代理）</span><span class="time">空闲</span></div>
+        <div class="sess"><span class="dot y"></span><span class="t">reviewer（自定义）</span><span class="time">需输入</span></div>
+      </div>
+      <div class="side-foot">
+        <div class="acct" onclick="go('profile')">
+          <span class="avatar">F</span>
+          <div><div style="font-size:12.5px;font-weight:600">findly</div><div style="font-size:10.5px;color:var(--muted)">Kilo Gateway · Personal</div></div>
+          <span class="bal">$12.40</span>
+        </div>
+        <button class="item" data-nav="settings" onclick="go('settings')" style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;font-size:13px;width:100%;text-align:left"><span class="ic" style="width:16px;text-align:center;color:var(--muted)">⚙️</span>设置</button>
+      </div>
+    </aside>
+
+    <main class="center">
+      <div class="viewwrap">
+        <section class="view show" id="view-chat">
+          <div class="taskheader">
+            <div class="th-row">
+              <span class="th-title" contenteditable="true" title="点击重命名">给 SessionStore 加 SQLite 持久化</span>
+              <div class="th-meta">
+                <span class="pill" title="本会话累计费用（按模型细分见展开时间线）">$ <b id="costNow">0.0421</b></span>
+                <span class="pill" title="上下文占用 34% · 68.2K / 200K" onclick="toggleTimeline()">
+                  <span class="ctxbar"><i id="ctxFill"></i></span><b id="ctxPct">34%</b>
+                </span>
+                <button class="iconbtn" title="压缩上下文 /compact" onclick="toast('已插入压缩分割线，后续对话基于摘要继续')">⤓</button>
+                <button class="iconbtn" title="转录内搜索（Aa 大小写 / 全词 / 正则 / n/m 计数）" onclick="toast('转录搜索条：输入即高亮定位，支持正则与搜索历史')">🔍</button>
+                <button class="iconbtn" title="展开活动/用量" onclick="toggleTimeline()">▾</button>
+              </div>
+            </div>
+            <div class="timeline" id="timeline">
+              <div class="tl-bars" title="回合活动条：点击定位到对应消息">
+                <span style="height:12px"></span><span class="tool" style="height:20px"></span><span class="tool" style="height:26px"></span><span style="height:9px"></span><span class="tool" style="height:18px"></span><span class="err" style="height:14px"></span><span class="tool" style="height:30px"></span><span style="height:16px"></span><span class="tool" style="height:22px"></span>
+              </div>
+              <div class="ctxprog" title="已用上下文 / 输出预留 / 剩余"><i style="width:34%"></i><i style="width:12%"></i><i style="width:54%"></i></div>
+              <div class="tl-legend">
+                <span>输入 <b>66.0K</b>（缓存读 61.2K · 命中 93%）</span>
+                <span>输出 <b>2.2K</b></span>
+                <span>推理 <b>0.8K</b></span>
+                <span style="margin-left:auto">claude-sonnet-4.5 · 9 steps · <b>$0.0421</b></span>
+                <button class="btn sm" onclick="openModule('usage')">完整用量 →</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="messages" id="messages" onscroll="onScroll()">
+            <div class="rail" title="PromptRail：每个用户消息一个刻度，hover 预览、点击跳转">
+              <i class="cur"></i><i></i><i></i>
+            </div>
+
+            <div class="msg user">
+              <div class="meta"><span class="badge gray">Code</span><span>sonnet-4.5</span><span>09:41</span></div>
+              <div class="bubble">给 <span class="chip file">@packages/opencode/src/session/store.ts</span> 加上 SQLite 持久化，参考 <span class="chip">🖼 会话截图.png</span> 里的表结构设计。跑一下测试。</div>
+              <div class="attach"><div class="thumb" title="点击放大预览">🖼️<span class="rm">✕</span></div></div>
+              <div class="hoveract"><button onclick="toast('已复制')">复制</button><button onclick="toast('已从此处 Fork 新会话')">Fork</button><button onclick="toast('已回退到此处（checkpoint 恢复文件快照）')">Revert</button></div>
+            </div>
+
+            <div class="msg ai" id="seedMsg">
+              <div class="role"><span class="logo"><img src="logo.png" alt="K"></span>Kilo · <span class="badge gray">Code</span> · claude-sonnet-4.5</div>
+              <details class="think" open>
+                <summary>🧠 思考过程（完成后自动折叠 · 可展开）</summary>
+                <div class="body">session store 目前是内存 Map。引入 <code class="inline">bun:sqlite</code>，保持接口不变，把 load/save 改为 SQL；迁移时做一次全量落盘。</div>
+              </details>
+              <div class="md">
+                <p>好的。方案：<span class="filelink" onclick="toast('在编辑器打开 store.ts')">packages/opencode/src/session/store.ts:18</span> 内把内存 Map 换成 SQLite（<code class="inline">bun:sqlite</code>），表结构对齐截图里的 <code class="inline">sessions / messages / parts</code> 三表。</p>
+              </div>
+              <div class="tool">
+                <div class="thead"><span>📄</span><span class="tname">Read</span><span class="tsub">session/store.ts</span><span class="tstat">128 行<span class="badge ok">完成</span></span></div>
+              </div>
+              <div class="tool">
+                <div class="thead"><span>✓</span><span class="tname">To-dos</span><span class="tsub">2/4</span><span class="tstat"><span class="badge run">进行中</span></span></div>
+                <div class="tbody">
+                  <ul class="todo">
+                    <li class="done"><span class="cb">✓</span>设计 sessions/messages/parts 表结构</li>
+                    <li class="done"><span class="cb">✓</span>实现 SqliteStore（load/save/delete）</li>
+                    <li><span class="cb"></span>迁移脚本：旧 JSON 会话导入</li>
+                    <li><span class="cb"></span>补充 store 单元测试</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="hoveract" style="opacity:1"><button onclick="toast('已复制回复')">复制</button><button onclick="toast('感谢反馈')">👍</button><button onclick="toast('已记录')">👎</button><span style="font-size:11px;color:var(--faint);align-self:center">42.1 tok/s</span></div>
+            </div>
+
+            <div class="working" id="working">
+              <span class="spinner"></span><span id="workingText">正在工作…</span>
+              <span class="elapsed" id="workingElapsed">0s</span>
+              <button class="btn sm danger" id="retryCancel" style="display:none">取消重试</button>
+            </div>
+
+            <div id="streamAnchor"></div>
+
+            <div class="permdock" id="permdock" style="display:none">
+              <div class="ph"><span class="ic">⚠</span>请求执行命令 <span style="margin-left:auto;font-weight:400;font-size:11px;color:var(--muted)">bash · 来自 explore 子代理</span></div>
+              <div class="hint">该命令将修改你的系统。允许一次，或为同类命令开启自动批准。</div>
+              <pre style="font-family:var(--mono);font-size:11.5px;background:#191a1d;color:#d7dae0;border-radius:8px;padding:8px 10px"><span class="p" style="color:#7ee787">$</span> bun test ./test/session/sqlite-store.test.ts <span style="color:#8b949e">⧉</span></pre>
+              <div class="rules">
+                <div style="font-weight:700;margin-bottom:3px">管理自动批准 <span style="font-weight:400">（本次及以后的匹配规则）</span></div>
+                <label><span class="switch sm on" onclick="this.classList.toggle('on')"><i></i></span> <code class="inline">bun test *</code> 只读测试命令</label>
+                <label><span class="switch sm" onclick="this.classList.toggle('on')"><i></i></span> <code class="inline">rm -rf *</code> 危险删除</label>
+              </div>
+              <div class="pactions">
+                <button class="btn primary" id="allowOnce" onclick="allowOnce()">允许一次</button>
+                <button class="btn danger" onclick="denyOnce()">拒绝</button>
+                <span style="margin-left:auto;font-size:11px;color:var(--muted)"><span class="kbd">Enter</span> 允许 · <span class="kbd">Esc</span> 拒绝</span>
+              </div>
+            </div>
+
+            <div class="qdock" id="qdock" style="display:none">
+              <div class="qh"><b>问题 1/2</b><button class="iconbtn">‹</button><button class="iconbtn">›</button></div>
+              <div class="q">旧 JSON 会话文件要自动迁移进 SQLite 吗？</div>
+              <div class="qopt sel" onclick="pick(this)"><span class="mk"></span><div>自动迁移<div class="d">首次启动时把 .json 会话导入 SQLite，原文件改名 .bak</div></div></div>
+              <div class="qopt" onclick="pick(this)"><span class="mk"></span><div>只迁移当前项目<div class="d">按项目目录懒迁移，其余保留 JSON 双读</div></div></div>
+              <div class="qopt" onclick="pick(this)"><span class="mk"></span><div>✎ 输入自定义答案…<div class="d">Type your own answer</div></div></div>
+              <div class="qfoot"><button class="btn sm" onclick="toast('已跳过并继续')">跳过</button><span style="flex:1"></span><button class="btn primary sm" onclick="toast('已提交回答（⌘↵）')">提交</button></div>
+            </div>
+
+            <div class="queued" id="queued" style="display:none">
+              <span class="qtag">排队中</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">顺便把 README 里的存储说明也更新一下</span>
+              <button class="btn sm" onclick="toast('已取回输入框编辑')">编辑</button><button class="btn sm" onclick="toast('已删除排队项')">删除</button>
+            </div>
+          </div>
+          <div class="tobottom" id="tobottom" onclick="scrollBottom()">↓</div>
+
+          <div class="inputzone">
+            <div class="hero">
+              <img class="hero-logo" src="logo.png" alt="Kilo">
+              <h2>早上好，继续推进 opencode？</h2>
+              <p>描述目标即可 · 支持 / 命令、@ 文件提及、图片拖拽与粘贴</p>
+            </div>
+            <div class="dockrow">
+              <button class="newbtn" onclick="newChat()">＋ 新会话</button>
+              <button class="iconbtn" title="Fork 当前会话" onclick="toast('已 Fork：从当前消息分支出新会话')">⑂</button>
+              <button class="iconbtn" title="新建 Worktree（git worktree 会话隔离）" onclick="toast('创建 worktree 会话：分支 kilo/sqlite-store')">⌥</button>
+              <button class="newbtn" title="查看本会话改动" onclick="openModule('diff')" style="margin-left:auto">🧩 Show Changes <span class="stat"><span class="a">+214</span><span class="d">−36</span></span></button>
+              <span class="pill" title="/goal：设定长期目标让代理持续推进" onclick="toast('输入 /goal <目标> 进入目标模式；运行中可暂停/恢复/清除')">◎ Goal</span>
+            </div>
+
+            <div class="promptbox" id="promptbox">
+              <div class="popmenu" id="slashMenu"></div>
+              <div class="modelpop" id="modelPop">
+                <div class="mp-left">
+                  <div class="mp-search"><input placeholder="搜索模型…" oninput="renderModelList(this.value)"></div>
+                  <div class="mp-list" id="mpList"></div>
+                </div>
+                <div class="mp-right" id="mpPreview"></div>
+              </div>
+              <div class="shieldpop" id="shieldPop">
+                <div class="sh-row"><span class="lbl">读文件 / Glob / Grep / List</span><span class="lvl allow">自动批准</span></div>
+                <div class="sh-row"><span class="lbl">编辑文件</span><span class="lvl ask">询问</span></div>
+                <div class="sh-row"><span class="lbl">Bash 命令</span><span class="lvl ask">询问</span><button class="btn sm" onclick="toast('已为 bun test * 建立例外规则')">例外 +</button></div>
+                <div class="sh-row"><span class="lbl">工作区外目录</span><span class="lvl ask">询问</span></div>
+                <div class="sh-row"><span class="lbl">WebSearch / WebFetch</span><span class="lvl allow">自动批准</span></div>
+                <div class="sh-row"><span class="lbl">子代理 Task / Skill</span><span class="lvl allow">自动批准</span></div>
+                <div class="sh-foot"><span>会话花费上限 <b>$5.00</b></span><button class="btn sm" onclick="go('settings');setTab('approve')">全部规则 →</button></div>
+              </div>
+
+              <div class="pimgs" id="pimgs" style="display:none">
+                <div class="thumb">🖼️<span class="rm" onclick="this.parentNode.remove();this.parentNode.style.display='none'">✕</span></div>
+              </div>
+              <textarea class="ptext" id="ptext" rows="1" placeholder="让 Kilo 做什么…（/ 命令 · @ 提及 · 拖拽/粘贴图片）"
+                oninput="onType(this)" onkeydown="onKey(event)" onfocus="promptbox.classList.add('focus')" onblur="promptbox.classList.remove('focus')"></textarea>
+              <div class="pbar">
+                <button class="iconbtn" title="添加附件（文件/图片）" onclick="attachImage()">＋</button>
+                <button class="selector" onclick="cycleMode()" title="交互模式：Code / Plan / Ask">🧭 <span class="v" id="modeName">Code</span><span class="caret">▼</span></button>
+                <button class="selector" onclick="toggleModelPop()" title="模型（/models）">🅰 <span class="v" id="modelName">Claude Sonnet 4.5</span><span class="caret">▼</span></button>
+                <button class="selector" onclick="cycleVariant()" title="推理强度变体（Shift+Tab 循环）">◐ <span class="v" id="variantName">默认</span><span class="caret">▼</span></button>
+                <span class="spacer"></span>
+                <button class="iconbtn" id="shieldBtn" title="自动批准：部分开启" onclick="toggleShield()">🛡️</button>
+                <button class="iconbtn" title="提示词增强 · Ctrl+Z 可撤销" onclick="enhance()">🪄</button>
+                <button class="sendbtn" id="sendBtn" title="发送 (Enter) / 停止 (Esc)" onclick="send()">↑</button>
+              </div>
+            </div>
+            <div class="hintline">
+              <span><span class="kbd">Enter</span> 发送</span><span><span class="kbd">⇧Enter</span> 换行</span><span><span class="kbd">↑</span> 历史提示词</span>
+              <span style="margin-left:auto" id="tokHint">≈ 36 tok · 68.2K/200K</span>
+            </div>
+            <div class="chips">
+              <button onclick="fillPrompt('给 SessionStore 加 SQLite 持久化，跑测试')">给 SessionStore 加 SQLite 持久化</button>
+              <button onclick="fillPrompt('修复 MCP 连接超时后不重试的问题')">修复 MCP 超时不重试</button>
+              <button onclick="fillPrompt('评审当前分支的未提交改动')">评审未提交改动</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="view-history">
+          <div class="page">
+            <h2>历史会话</h2>
+            <div class="lead">本地 SQLite 持久化 · 支持云端同步与 Worktree 会话</div>
+            <div class="htabs">
+              <div class="htab active" onclick="hTab(this,'local')">本地</div>
+              <div class="htab" onclick="hTab(this,'cloud')">云端</div>
+              <div class="htab" onclick="hTab(this,'wt')">Worktree</div>
+            </div>
+            <div class="hsearch">
+              <input placeholder="按标题搜索…" oninput="filterHistory(this.value)">
+              <label style="font-size:12px;color:var(--muted);display:flex;gap:5px;align-items:center"><input type="checkbox"> 仅当前仓库</label>
+              <button class="btn" onclick="openModal('cloudimport')">⤓ 导入云端会话</button>
+            </div>
+            <div id="historyList"></div>
+          </div>
+        </section>
+
+        <section class="view" id="view-settings">
+          <div class="settings">
+            <div class="set-nav" id="setNav"></div>
+            <div class="set-body" id="setBody"></div>
+            <div class="savebar"><span>● 有未保存更改</span><span class="sp" style="flex:1"></span><button class="btn" onclick="toast('已放弃更改')">放弃</button><button class="btn primary" onclick="toast('已保存到 kilo.json（按 global/project 作用域分发）')">保存</button></div>
+          </div>
+        </section>
+
+        <section class="view" id="view-profile">
+          <div class="page">
+            <h2>账户</h2>
+            <div class="lead">Kilo Gateway · 组织 / 余额 / 配额用量</div>
+            <div class="pcard">
+              <div style="display:flex;align-items:center;gap:12px">
+                <span class="avatar" style="width:40px;height:40px;font-size:16px">F</span>
+                <div><div style="font-weight:700">findly</div><div style="font-size:11.5px;color:var(--muted)">findly@example.com · 已登录 Kilo Gateway</div></div>
+                <select class="sel" style="margin-left:auto"><option>Personal</option><option>Kilo-Org</option><option>work-team</option></select>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:14px">
+                <button class="btn" onclick="toast('打开 app.kilo.ai/profile')">📊 Dashboard</button>
+                <button class="btn primary" onclick="toast('打开 app.kilo.ai/credits')">💳 充值</button>
+                <button class="btn" onclick="toast('已退出登录（本地供应商密钥保留）')">退出</button>
+                <span style="margin-left:auto;align-self:center;font-size:12px;color:var(--muted)">余额 <b style="color:var(--green);font-family:var(--mono)">$12.40</b> <button class="btn sm" onclick="toast('已刷新余额')">↻</button></span>
+              </div>
+            </div>
+            <div class="pcard">
+              <h4>Kilo Pass <span class="badge ok">Pro</span></h4>
+              <div class="meter"><i style="width:62%"></i></div>
+              <div style="font-size:11.5px;color:var(--muted);display:flex;justify-content:space-between"><span>已用 $37.20 / $60.00（周期）</span><span>续期 2026-10-01</span></div>
+            </div>
+            <div class="pcard">
+              <h4>供应商配额 <button class="btn sm" style="float:right" onclick="toast('已刷新')">↻</button></h4>
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><span class="picon" style="width:20px;height:20px;font-size:10px">A</span><b style="font-size:12px">Anthropic · Direct</b><span class="badge gray">周窗口</span></div>
+              <div class="meter"><i class="warn" style="width:81%"></i></div>
+              <div style="font-size:11.5px;color:var(--muted);display:flex;justify-content:space-between"><span>已用 81% · 剩余 1.9M tokens</span><span>重置 3 天后</span></div>
+              <div style="display:flex;gap:8px;align-items:center;margin:14px 0 8px"><span class="picon" style="width:20px;height:20px;font-size:10px">O</span><b style="font-size:12px">OpenRouter · Kilo Gateway 路由</b></div>
+              <div class="meter"><i style="width:23%"></i></div>
+              <div style="font-size:11.5px;color:var(--muted)">已用 23% · 本窗口 $2.10</div>
+            </div>
+            <div class="pcard">
+              <h4>设备授权登录（新机器）</h4>
+              <div class="devauth">
+                <div class="step">STEP 1 · 在浏览器打开</div>
+                <div class="url">https://app.kilo.ai/device <button class="btn sm" onclick="toast('已复制')">⧉</button><button class="btn sm" onclick="toast('已打开默认浏览器')">打开</button></div>
+                <div class="step">STEP 2 · 输入验证码（点击复制）</div>
+                <div class="code" onclick="toast('验证码已复制')">K4T-72Q</div>
+                <div style="display:flex;align-items:center;margin-top:10px;font-size:12px;color:var(--muted)"><span class="spinner"></span><span style="margin-left:8px">等待授权… 剩余 14:32</span><button class="btn sm" style="margin-left:auto" onclick="toast('已取消')">取消</button></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <aside class="rightbar" id="rightbar">
+      <div class="rb-head"><span class="ttl" id="rbTitle">模块</span><button class="iconbtn close" onclick="closeModule()">✕</button></div>
+      <div class="rb-body" id="rbBody"></div>
+    </aside>
+  </div>
+</div>
+
+<div class="overlay" id="overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="m-provider">
+    <div class="mhead"><h3>连接 Anthropic</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="mbody">
+      <div class="auth-method" onclick="showAuthView('apikey')"><span class="ic">🔑</span><div><b>API Key</b><br><span>粘贴你的 Anthropic API 密钥，密钥保存在本地配置</span></div></div>
+      <div class="auth-method" onclick="showAuthView('oauth')"><span class="ic">🛰️</span><div><b>OAuth</b><br><span>打开浏览器完成授权（ChatGPT / Claude 订阅账号）</span></div></div>
+      <div id="auth-apikey" style="display:none">
+        <div class="field"><label>API Key</label><input type="password" placeholder="sk-ant-…"><div class="hint">支持 <code class="inline">{env:ANTHROPIC_API_KEY}</code> 环境变量语法 · 本地 provider（Ollama 等）可留空</div></div>
+        <div class="field"><label>Base URL <span class="opt">可选（代理/网关）</span></label><input placeholder="https://…"></div>
+        <div class="notice info">BYOK 模式下经 Kilo Gateway 路由仍可享受统一用量统计。了解更多 →</div>
+      </div>
+      <div id="auth-oauth" style="display:none">
+        <div class="devauth"><div class="step">已打开浏览器 · 确认码</div><div class="code">8F-2K-A9</div><div style="display:flex;align-items:center;margin-top:10px;font-size:12px;color:var(--muted)"><span class="spinner"></span><span style="margin-left:8px">等待回调…</span></div></div>
+        <div class="field" style="margin-top:12px"><label>或手动粘贴授权 code <span class="opt">（无法打开浏览器时）</span></label><input placeholder="code…"></div>
+      </div>
+    </div>
+    <div class="mfoot"><button class="btn" onclick="closeModal()">取消</button><button class="btn primary" onclick="closeModal();toast('Anthropic 已连接 · 12 个模型可用')">连接</button></div>
+  </div>
+
+  <div class="modal wide" id="m-custom">
+    <div class="mhead"><h3>添加自定义供应商</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="mbody">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="field"><label>Provider ID</label><input placeholder="my-provider"><div class="hint">小写字母/数字/连字符；编辑时不可修改</div></div>
+        <div class="field"><label>显示名称</label><input placeholder="My Provider"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="field"><label>SDK 包（协议）</label><select><option>@ai-sdk/openai-compatible（OpenAI Compatible）</option><option>@ai-sdk/openai（OpenAI Responses）</option><option>@ai-sdk/anthropic（Anthropic Messages）</option></select></div>
+        <div class="field"><label>Base URL</label><input placeholder="https://api.example.com/v1"><div class="hint">需 http(s):// 前缀</div></div>
+      </div>
+      <div class="field"><label>API Key</label><input type="password" placeholder="留空 = 无需密钥（本地模型）"></div>
+
+      <div style="display:flex;align-items:center;margin:16px 0 8px"><b style="font-size:12.5px">模型</b><button class="btn sm" style="margin-left:10px" onclick="document.getElementById('pullPanel').style.display='block'">⟳ 自动拉取 /models</button><button class="btn sm" style="margin-left:auto" onclick="addModelCard()">＋ 添加模型</button></div>
+      <div id="modelCards">
+        <div class="mcard">
+          <div class="mc-grid">
+            <div><label>Model ID</label><input value="qwen3-235b-a22b"></div>
+            <div><label>显示名称</label><input value="Qwen3 235B"></div>
+            <div class="cbs"><label><input type="checkbox" checked> 支持推理</label></div>
+            <div class="cbs"><label><input type="checkbox"> 支持图片</label><button class="btn sm" onclick="this.closest('.mcard').remove()">✕</button></div>
+          </div>
+          <div style="font-size:10.5px;color:var(--faint);margin-top:6px">变体（随拉取保留）：reasoningEffort none→xhigh · outputEffort low→max · enable_thinking · thinking: enabled/disabled/adaptive</div>
+        </div>
+      </div>
+      <div class="notice info" id="pullPanel" style="display:none">拉取到 <b>3</b> 个模型 — 勾选后「添加」：
+        <div class="pullrow"><input type="checkbox" checked> <b>glm-4.6</b> <span style="color:var(--muted)">128K ctx · reasoning</span></div>
+        <div class="pullrow"><input type="checkbox" checked> <b>kimi-k2</b> <span style="color:var(--muted)">256K ctx · toolcall</span></div>
+        <div class="pullrow"><input type="checkbox"> <b>legacy-v1</b> <span style="color:var(--muted)">32K ctx</span></div>
+        <button class="btn sm primary" onclick="closeModal();toast('已添加 2 个模型')">添加 (2)</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px"><button class="btn sm" onclick="toast('已批量开启全部模型的 reasoning')">全部支持推理</button><button class="btn sm" onclick="toast('已批量开启图片模态')">全部支持图片</button></div>
+
+      <b style="font-size:12.5px">请求头（可选）</b>
+      <div class="addrow" style="margin-top:8px"><input class="tinp mono" placeholder="X-API-Version"><input class="tinp mono" placeholder="2026-01"><button class="btn sm">＋</button></div>
+    </div>
+    <div class="mfoot"><button class="btn" onclick="closeModal()">取消</button><button class="btn" onclick="toast('已打开全局配置文件 kilo.json')">高级：直接编辑配置</button><button class="btn primary" onclick="closeModal();toast('自定义供应商已保存并连接 · 1 个模型')">保存</button></div>
+  </div>
+
+  <div class="modal" id="m-mcp">
+    <div class="mhead"><h3>编辑 MCP Server：context7</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="mbody">
+      <div class="field"><label>传输类型</label><select onchange="mcpTransport(this.value)"><option value="http">http（远程 URL）</option><option value="sse">sse（远程 URL）</option><option value="stdio">stdio（本地命令）</option></select><div class="hint">也可直接编辑 <code class="inline">.kilo/kilo.json</code> 的 <code class="inline">mcp</code> 段，或从市场安装</div></div>
+      <div id="mcp-remote">
+        <div class="field"><label>URL</label><input style="font-family:var(--mono);font-size:11.5px" value="https://mcp.context7.com/mcp"></div>
+        <div class="field"><label>Headers <span class="opt">（鉴权时）</span></label><div class="addrow"><input class="tinp mono" placeholder="Authorization"><input class="tinp mono" placeholder="Bearer …"><button class="btn sm">＋</button></div></div>
+      </div>
+      <div id="mcp-stdio" style="display:none">
+        <div class="field"><label>Command</label><input style="font-family:var(--mono);font-size:11.5px" value="npx"></div>
+        <div class="field"><label>Args <span class="opt">（每行一个）</span></label><textarea>-y
+@upstash/context7-mcp</textarea></div>
+        <div class="field"><label>环境变量</label><div class="addrow"><input class="tinp mono" placeholder="KEY"><input class="tinp mono" placeholder="VALUE"><button class="btn sm">＋</button></div><div class="taglist" style="margin-top:8px"><span class="tag">API_KEY=sk-… <span class="x">✕</span></span></div></div>
+      </div>
+    </div>
+    <div class="mfoot"><button class="btn" onclick="closeModal()">取消</button><button class="btn danger" onclick="toast('已删除（二次确认）')">删除</button><button class="btn primary" onclick="closeModal();toast('MCP 配置已保存 · 正在重连…')">保存</button></div>
+  </div>
+
+  <div class="modal wide" id="m-market">
+    <div class="mhead"><h3>市场 · MCP / Agent / Skill</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="mbody">
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+        <input class="tinp" style="flex:1;min-width:160px" placeholder="搜索市场…">
+        <button class="btn sm" style="background:#e7efff;border-color:#cddcfb">MCP</button><button class="btn sm">Agent</button><button class="btn sm">Skill</button>
+        <select class="sel" style="min-width:110px"><option>全部状态</option><option>已安装</option><option>未安装</option></select>
+        <label style="font-size:11.5px;color:var(--muted)"><input type="checkbox" checked> 与当前项目相关</label>
+      </div>
+      <div style="border:1px solid var(--line);border-radius:10px;margin-bottom:8px;padding:12px;display:flex;gap:10px;align-items:center;cursor:pointer" onclick="openModal('install')">
+        <span class="picon">🧩</span><div style="flex:1"><b>Playwright MCP</b> <span class="badge gray">mcp</span><div style="font-size:11px;color:var(--muted)">微软官方 · 浏览器自动化 · 分类: 开发工具 · by microsoft</div></div>
+        <button class="btn sm primary" onclick="event.stopPropagation();openModal('install')">安装</button>
+      </div>
+      <div style="border:1px solid var(--line);border-radius:10px;margin-bottom:8px;padding:12px;display:flex;gap:10px;align-items:center">
+        <span class="picon">🕵</span><div style="flex:1"><b>security-reviewer</b> <span class="badge gray">agent</span><div style="font-size:11px;color:var(--muted)">安全审查子代理 · 分类: 质量 · by kilo</div></div>
+        <button class="btn sm" onclick="toast('已安装到项目 .kilo/agents/')">安装</button>
+      </div>
+      <div style="border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;gap:10px;align-items:center">
+        <span class="picon">📘</span><div style="flex:1"><b>godot-gdscript-patterns</b> <span class="badge gray">skill</span> <span class="badge ok">已安装 · global</span><div style="font-size:11px;color:var(--muted)">Godot 4 GDScript 模式 · 分类: 游戏 · by community</div></div>
+        <button class="btn sm danger" onclick="toast('已确认卸载（global 作用域）')">移除</button>
+      </div>
+      <div style="font-size:11px;color:var(--faint);margin-top:10px">想贡献条目？→ github.com/Kilo-Org/kilo-marketplace</div>
+    </div>
+  </div>
+
+  <div class="modal" id="m-install">
+    <div class="mhead"><h3>安装 Playwright MCP</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="mbody">
+      <div class="field"><label>安装作用域</label><div style="display:flex;gap:8px">
+        <button class="btn sm primary" onclick="scopePick(this)">项目（当前工作区）</button><button class="btn sm" onclick="scopePick(this)">全局</button></div>
+        <div class="hint">写入目标：<code class="inline">.kilo/kilo.json → mcp.playwright</code>（全局为 ~/.config/kilo/kilo.json）</div></div>
+      <div class="field"><label>安装方式</label><select><option>npx @playwright/mcp@latest（推荐）</option><option>docker run mcp/playwright</option></select></div>
+      <div class="notice warn">⚠ MCP server 以你的用户权限运行外部进程，安装前请确认来源可信。</div>
+      <b style="font-size:12px">前置条件</b><ul style="font-size:11.5px;color:var(--muted);margin:6px 0 12px 18px"><li>Node.js ≥ 18</li></ul>
+      <div class="field"><label>参数：<code class="inline">--browser</code> <span class="opt">可选</span></label><input placeholder="chromium"></div>
+      <div class="field"><label>参数：<code class="inline">--headless</code></label><select><option>true</option><option>false</option></select></div>
+    </div>
+    <div class="mfoot"><button class="btn" onclick="closeModal()">取消</button><button class="btn primary" onclick="closeModal();toast('安装成功 → .kilo/kilo.json · 已自动连接（绿点）')">安装</button></div>
+  </div>
+
+  <div class="modal" id="m-cloudimport">
+    <div class="mhead"><h3>导入云端会话</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="mbody">
+      <div class="field"><label>粘贴会话链接或 ID</label><textarea placeholder="https://kilo.ai/s/ses_abc123… 或 ses_abc123 / UUID"></textarea><div class="hint">自动提取 ses_* / UUID；旧版 UUID 云端会话不支持导入</div></div>
+    </div>
+    <div class="mfoot"><button class="btn" onclick="closeModal()">取消</button><button class="btn primary" onclick="closeModal();toast('已导入为新会话（含完整消息与附件）')">导入</button></div>
+  </div>
+
+  <div class="modal" id="m-feedback">
+    <div class="mhead"><h3>反馈</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="mbody" style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn" style="justify-content:center;padding:12px" onclick="toast('打开 github.com/Kilo-Org/kilocode/issues')">🐙 提交 GitHub Issue</button>
+      <button class="btn" style="justify-content:center;padding:12px" onclick="toast('打开 Discord 社区')">💬 Discord 社区</button>
+      <button class="btn" style="justify-content:center;padding:12px" onclick="toast('打开 kilo.ai/support')">🛟 联系支持</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script>
+/* Kilo Desktop 原型逻辑 — 数据、视图、设置渲染、流式演示、右栏模块 */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2400)}
+function openModal(n){$$(".modal").forEach(m=>m.style.display="none");$("#m-"+n).style.display="block";$("#overlay").classList.add("show")}
+function closeModal(){$("#overlay").classList.remove("show")}
+function showAuthView(v){$("#auth-apikey").style.display=v==="apikey"?"block":"none";$("#auth-oauth").style.display=v==="oauth"?"block":"none"}
+function mcpTransport(v){const r=v==="stdio";$("#mcp-stdio").style.display=r?"block":"none";$("#mcp-remote").style.display=r?"none":"block"}
+function scopePick(b){b.parentNode.querySelectorAll(".btn").forEach(x=>x.classList.remove("primary"));b.classList.add("primary")}
+function pick(el){el.parentNode.querySelectorAll(".qopt").forEach(x=>x.classList.remove("sel"));el.classList.add("sel")}
+function toggleLeft(){$("#shell").classList.toggle("no-left")}
+function toggleRight(){$("#shell").classList.toggle("no-right")}
+function toggleShield(){$("#shieldPop").classList.toggle("show");$("#modelPop").classList.remove("show");$("#slashMenu").classList.remove("show")}
+function enhance(){const p=$("#ptext");if(!p.value.trim()){p.value="说明要做什么，Kilo 会把草稿增强为结构化提示词";toast("空草稿：填入默认描述");return}p.value=p.value.trim()+"\n\n要求：1) 先复述目标 2) 列出改动文件 3) 每步附验证方式";toast("提示词已增强 · Ctrl+Z 撤销")}
+
+/* ============ 数据 ============ */
+const MODELS=[
+ {g:"⭐ 收藏",items:[{id:"claude-sonnet-4.5",n:"Claude Sonnet 4.5",p:"Anthropic",in:"$3",out:"$15",ctx:"200K",r:1,s:0,star:1,desc:"编码与推理均衡的旗舰模型，工具调用稳定。"}]},
+ {g:"AUTO",items:[{id:"kilo-auto",n:"Auto（智能路由）",p:"Kilo Gateway",in:"按路由",out:"—",ctx:"—",r:0,s:0,desc:"按任务复杂度自动选最优模型，候选列表可预览。"}]},
+ {g:"推荐",items:[
+  {id:"gpt-5",n:"GPT-5",p:"OpenAI",in:"$1.25",out:"$10",ctx:"400K",r:1,s:1,desc:"OpenAI 旗舰，长上下文与视觉。"},
+  {id:"gemini-3-pro",n:"Gemini 3 Pro",p:"Google",in:"$1.25",out:"$10",ctx:"1M",r:1,s:1,desc:"超长上下文，多模态。"}]},
+ {g:"最常用",items:[{id:"gpt-5-mini",n:"GPT-5 Mini",p:"OpenAI",in:"$0.25",out:"$2",ctx:"400K",r:0,s:0,desc:"轻量快速，适合日常任务。"}]},
+ {g:"Anthropic",items:[{id:"claude-opus-4.1",n:"Claude Opus 4.1",p:"Anthropic",in:"$15",out:"$75",ctx:"200K",r:1,s:1,desc:"复杂推理最强档。"}]},
+ {g:"OpenRouter",items:[{id:"deepseek-v3.2",n:"DeepSeek V3.2",p:"OpenRouter",free:1,in:"$0.28",out:"$0.42",ctx:"128K",r:1,s:0,desc:"高性价比开源权重模型。"}]},
+ {g:"Ollama（本地）",items:[{id:"qwen3-coder",n:"Qwen3 Coder 32B",p:"Ollama",free:1,in:"免费",out:"免费",ctx:"128K",r:0,s:0,desc:"本地运行 · localhost:11434 · BYOK"}]}
+];
+const SLASH=[
+ {h:"动作"},
+ {c:"/new",d:"清空缓存并开新会话"},{c:"/sessions",d:"打开历史会话"},{c:"/models",d:"选择模型"},{c:"/agents",d:"切换代理/模式"},{c:"/variant",d:"切换推理强度"},
+ {c:"/goal",d:"设定长期目标，代理持续推进"},{c:"/compact",d:"压缩当前上下文"},{c:"/export",d:"导出 Markdown 转录"},{c:"/help",d:"打开文档"},{c:"/settings",d:"打开设置"},
+ {h:"命令 · 自定义 Skills / Workflows"},
+ {c:"/review",d:"代码评审（uncommitted / branch / pr…）",g:"workflow"},{c:"/memory",d:"项目记忆：status / remember / forget…",g:"workflow"},
+ {c:"/commit-msg",d:"生成提交信息",g:"workflow"},{c:"/update-from-base",d:"worktree 会话合并基线分支",g:"workflow"}
+];
+const MENTIONS=[
+ {h:"条目"},
+ {c:"@terminal",d:"附加活动终端输出",i:"⌨"},{c:"@git-changes",d:"附加当前 worktree 变更",i:"⑂"},{c:"@past-chats",d:"搜索并引用历史会话",i:"💬"},{c:"@worktrees",d:"引用其他 worktree",i:"⌥"},{c:"@…",d:"浏览工作区外文件",i:"🗀"},
+ {h:"文件"},
+ {c:"@packages/opencode/src/session/store.ts",d:"session store",i:"📄"},{c:"@packages/opencode/src/session/",d:"目录",i:"📁"},{c:"@README.md",d:"已打开",i:"📄"}
+];
+const SESSIONS={
+ "今天":[{t:"给 SessionStore 加 SQLite 持久化",m:"刚刚",act:"run"},{t:"重构 diff 渲染性能",m:"09:12",act:"warn"},{t:"修复 MCP 超时重试",m:"08:47",act:""}],
+ "昨天":[{t:"支付模块设计评审",m:"昨天",act:""},{t:"写 changelog 脚本",m:"昨天",act:""}],
+ "本周":[{t:"升级 Solid 到 1.9",m:"周一",act:""},{t:"索引 LanceDB 迁移",m:"周一",act:""}],
+ "更早":[{t:"原型：Agent Manager 布局",m:"8月28日",act:""}]
+};
+const SETTINGS={
+ models:{title:"模型",lead:"默认模型与各角色模型覆盖；供应商密钥在「供应商」页管理",groups:[
+  {name:"角色模型",rows:[
+   ["默认对话模型","聊天输入框未显式选择时使用","sel","Claude Sonnet 4.5"],
+   ["小模型","标题生成/摘要等轻任务（含 kilo-auto/small）","sel","GPT-5 Mini"],
+   ["子代理模型","Task 工具派生子代理使用","sel","（沿用对话模型）"],
+   ["子代理推理变体","子代理的 thinking 档位","sel","默认"]]},
+  {name:"辅助模型",rows:[
+   ["自动补全模型","Ghost text 行内补全","sel","qwen3-coder（本地）"],
+   ["语音转文字模型","⌘K push-to-talk 使用（需登录 Kilo）","sel","whisper-1"],
+   ["隐藏 prompt-training 模型","不在选择器展示训练用途模型","sw","0"]]},
+  {name:"按模式（Code/Plan/Ask）的模型覆盖",rows:[
+   ["Code 模式模型","覆盖该模式默认模型","sel","Claude Sonnet 4.5"],
+   ["Plan 模式模型","","sel","Claude Opus 4.1"],
+   ["Ask 模式模型","","sel","GPT-5 Mini"]]}]},
+ providers:{title:"供应商",lead:"Kilo Gateway 统一路由，或直连任意供应商（BYOK）",groups:[
+  {name:"Kilo Gateway",rows:[["已登录 · findly@example.com","Personal 组织 · 余额 $12.40","tag","✓ 已连接 · 统一路由/用量统计"]]},
+  {name:"已连接",rows:[
+   ["Anthropic","API Key 直连 · 12 模型","ptag","A|Anthropic|config"],
+   ["OpenAI","Sign in with ChatGPT（OAuth）· 6 模型","ptag","O|OpenAI|oauth"],
+   ["Ollama","本地 · localhost:11434","ptag","◉|Ollama|local"],
+   ["my-provider","自定义 OpenAI Compatible","ptag","⚙|My Provider|custom"]]},
+  {name:"热门",rows:[
+   ["Google Gemini","generative-ai 密钥","connect"],["DeepSeek","API 密钥","connect"],
+   ["OpenRouter","聚合目录密钥","connect"],["AWS Bedrock","Access Key / IAM 会话","connect"],
+   ["Azure OpenAI","endpoint / API Key","connect"],["Vercel AI Gateway","","connect"],
+   ["＋ 添加自定义供应商","OpenAI Compatible / Responses / Anthropic Messages 协议；自动拉取 /models","custom"]]},
+  {name:"已禁用供应商（可折叠）",rows:[["从下拉选择加入禁用","","tag","Mistral · Voyage ｜ 每行「启用」移除"]]}]},
+ behaviour:{title:"代理行为",lead:"Agents / MCP Servers / Rules / Workflows / Skills 五个子页",subtabs:["Agents","MCP Servers","Rules","Workflows","Skills"]},
+ approve:{title:"自动批准",lead:"细粒度工具权限：allow（自动批准）/ ask（询问）/ deny（拒绝），支持通配例外，命中最严格者生效",groups:[]},
+ browser:{title:"浏览器 / Web 工具",lead:"Web 搜索与浏览器自动化",groups:[{name:"",rows:[
+  ["Web Search","启用 Exa 网页搜索（global 作用域）","sw","1"],
+  ["使用系统 Chrome","用本机 Chrome 而非内置 Chromium","sw","1"],
+  ["Headless","无头模式（固定开启）","sw","1","disabled"],
+  ["浏览器自动化总开关","在实验性页也可控制","sw","0"]]}]},
+ checkpoints:{title:"检查点",lead:"每次修改前记录文件快照，支持逐消息 Revert/Redo",groups:[{name:"",rows:[
+  ["启用检查点/快照","Revert 依赖此开关恢复文件状态","sw","1"]]}]},
+ display:{title:"显示",lead:"外观与转录渲染",groups:[{name:"",rows:[
+  ["用户名","显示在历史与遥测中","txt","findly"],
+  ["字号","10–24px","rng","14"],
+  ["推理消息自动折叠","思考块完成后自动收起","sw","1"],
+  ["Shift+Tab 循环变体","输入框内快速切推理强度","sw","1"],
+  ["Token 吞吐显示","助手消息尾部显示 tok/s","sw","1"],
+  ["显示自动批准原因","审批卡上展示命中的规则","sw","0"],
+  ["终端命令展示","bash 工具卡默认状态","sel2","展开|折叠"],
+  ["代码编辑展示","edit 工具卡默认状态","sel2","折叠|展开"],
+  ["MCP 工具展示","MCP 调用卡默认状态","sel2","折叠|展开"]]}]},
+ context:{title:"上下文",lead:"项目记忆、自动压缩与文件监听",groups:[
+  {name:"项目记忆（/memory）",rows:[
+   ["启用","跨会话长期记忆 · 当前 412 条 / 18.2K tokens","sw","1"],
+   ["自动固化","会话结束后台整理记忆","sw","1"],
+   ["存储路径","","tag","~/.kilo/memory/opencode ｜ Inspect"]]},
+  {name:"压缩",rows:[
+   ["自动压缩","接近上下文上限时生成摘要分割线","sw","1"],
+   ["压缩模型","默认跟随聊天模型","sel","（跟随聊天模型）"],
+   ["触发阈值 %","上下文占用达到该百分比时压缩","num","92"],
+   ["修剪旧内容","压缩时丢弃陈旧工具输出","sw","0"]]},
+  {name:"Watcher 忽略模式",rows:[["监听文件变更时忽略的路径","添加输入框 + 列表","tags","node_modules/** ｜ dist/** ｜ .git/**"]]}]},
+ commit:{title:"提交信息",lead:"源代码管理面板的 AI 提交信息生成",groups:[{name:"",rows:[
+  ["提交信息语言","","sel2","跟随界面|English|日本語"],
+  ["覆盖默认提示词","启用后可自定义 prompt","sw","0"],
+  ["自定义 prompt","多行输入","ta","用 conventional commits 格式，中文，≤72 字符主题行"]]}]},
+ indexing:{title:"索引",lead:"语义代码索引（embedding + 向量库），供 @ 搜索与代码问答",groups:[
+  {name:"状态",rows:[["当前项目","opencode · 12,480 文件已索引","tag","● 就绪"]]},
+  {name:"配置（Global / 项目 两级作用域）",rows:[
+   ["本机同意","首次启用需确认（机器本地）","sw","1"],
+   ["启用索引","","sw","1"],
+   ["禁用时仍显示输入框按钮","","sw","0"],
+   ["Embedding Provider","Kilo / OpenAI / Ollama / Compatible / Gemini / Mistral / Bedrock / OpenRouter / Voyage","sel","Kilo"],
+   ["Embedding 模型","Kilo 目录模型","sel","kilo-embed-v2"],
+   ["向量维度","Kilo 时自动","num","1024"],
+   ["向量库","","sel2","LanceDB|Qdrant"],
+   ["LanceDB 目录","","tag","~/.kilo/index/opencode"],
+   ["文件扩展名","逗号分隔","txt",".ts,.tsx,.js,.go,.py"],
+   ["Search Min Score","","num","0.35"],
+   ["Search Max Results","","num","20"],
+   ["Embedding Batch Size","","num","64"]]}]},
+ experimental:{title:"实验性",lead:"功能开关与工具 kill-switch",groups:[{name:"",rows:[
+  ["远程控制","当前：Active ｜ 开机自动启动","sw","1"],
+  ["会话分享","manual / auto / disabled","sel2","manual|auto|disabled"],
+  ["代码格式化","编辑后自动跑 formatter","sw","0"],
+  ["LSP","启用语言服务协议诊断","sw","1"],
+  ["批量工具 batch","一次调用多工具","sw","0"],
+  ["图像生成","generate_image 工具","sw","1"],
+  ["图像生成模型","条件出现","sel2","agnes-image-2|dall-e-3"],
+  ["共享代理看板","SwarmBoard 多代理留言","sw","0"],
+  ["原生 Notebook 工具","","sw","0"],
+  ["拒绝后继续循环","deny 后不中断回合","sw","0"],
+  ["浏览器自动化","","sw","0"],
+  ["任务模型选择","Task 子代理允许选模型","sw","1"],
+  ["MCP 超时 ms","","num","60000"],
+  ["工具开关","逐个工具启用/禁用","tools","read|edit|bash|websearch|browser|chart|image|mcp:context7"]]}]},
+ sandbox:{title:"沙箱",lead:"命令执行隔离（macOS Seatbelt / Linux bubblewrap）",groups:[{name:"",rows:[
+  ["启用沙箱","命令在受限环境中执行","sw","1"],
+  ["阻止网络访问","deny（默认）/ allow","sw","1"],
+  ["允许的主机","host:port 白名单","tags","registry.npmjs.org:443"],
+  ["可写路径","沙箱内允许写入的路径","tags","/tmp ｜ ~/.kilo"]]}]},
+ language:{title:"语言",lead:"界面语言（翻译贡献欢迎 PR）",groups:[{name:"",rows:[["界面语言","auto 跟随系统","sel","简体中文（zh）"]]}]},
+ about:{title:"关于",lead:"版本、连接诊断与配置管理",groups:[{name:"",rows:[
+  ["版本","Kilo Desktop 1.0.0（CLI 引擎 · bun runtime）","tag","复制"],
+  ["CLI 服务器","本地引擎子进程","tag","● connected · :54321"],
+  ["社区","","tag","GitHub ｜ Reddit ｜ Discord ｜ 支持"],
+  ["导出设置","JSON（≤1MB）","btn","导出…"],
+  ["导入设置","","btn","导入…"],
+  ["从 Roo Code 导入","迁移历史会话与规则","btn","开始迁移向导"],
+  ["重置全部设置","危险操作","btn","重置"],
+  ["数据存储","会话/消息持久化于本地 SQLite：~/.kilo/desktop/kilo.db（WAL）；附件存 ~/.kilo/desktop/attachments/","tag","打开目录"]]}]}
+};
+const PERMS=[
+ ["外部目录","访问工作区之外的路径","ask","path","/Users/findly/Downloads/**"],
+ ["Bash","执行 shell 命令","ask","cmd","bun test * ｜ git * ｜ rm -rf *"],
+ ["读文件","read 工具","allow","path","*.env"],
+ ["编辑文件","edit / write / apply_patch","ask","path","kilo.json"],
+ ["Glob / Grep / List","目录与内容检索","allow","",""],
+ ["子代理 Task","派生 explore/general 等","allow","",""],
+ ["Skill","加载技能","allow","",""],
+ ["LSP","语言服务查询","allow","",""],
+ ["Todoread / Todowrite","任务清单（合并取最严格）","allow","",""],
+ ["WebSearch / WebFetch","联网检索","allow","",""],
+ ["Doom Loop","检测到死循环时","ask","",""]
+];
+const AGENTS=[["code","内置 · 主代理","默认编码代理，全工具","built-in"],["plan","内置 · 主代理","只读规划，产出计划文档","built-in"],["ask","内置 · 主代理","只问答，不改文件","built-in"],["explore","内置 · 子代理","快速检索代码库","sub"],["general","内置 · 子代理","通用多步任务","sub"],["reviewer","自定义 · 主代理","代码评审，deny edit","custom"]];
+const MCPS=[["context7","http","connected","https://mcp.context7.com/mcp"],
+["filesystem","stdio","connected","npx -y @modelcontextprotocol/server-filesystem ~/code"],
+["playwright","stdio","connected","npx @playwright/mcp@latest"],
+["github","sse","needs_auth","https://api.githubcopilot.com/mcp/"],
+["linear","stdio","disabled","uvx mcp-server-linear"]];
+const WORKFLOWS=[["/review","多目标代码评审（uncommitted/branch/pr）","gpt-5","high"],["/memory","项目记忆操作","—","—"],["/commit-msg","生成提交信息","gpt-5-mini","默认"]];
+const SKILLS=[["godot-gdscript-patterns","Godot 4 信号/场景/状态机模式","~/.kilo/skills/","global"],["chart","数据可视化图表规程",".kilo/skills/","project"],["higgsfield-websites","全栈站点生成","~/.kilo/skills/","global"],["kilo-config","Kilo 配置与 Agent Manager","内置","builtin"]];
+
+/* ============ 视图切换 ============ */
+function go(v){
+  $$(".view").forEach(x=>x.classList.remove("show"));
+  $("#view-"+v).classList.add("show");
+  $$(".sidebar .item").forEach(x=>x.classList.toggle("active",x.dataset.nav===v));
+  $("#crumb").textContent={chat:"New Chat · opencode",history:"历史会话",settings:"设置",profile:"账户"}[v];
+  if(v==="settings")renderSettings();
+  if(v==="history")renderHistory();
+}
+function newChat(silent){
+  go("chat");
+  $("#view-chat").classList.add("welcome");
+  const m=$("#messages");
+  m.querySelectorAll(".msg,.seed-extra").forEach(x=>{if(x.id!=="seedMsg")x.remove()});
+  $("#seedMsg").style.display="none";$("#streamAnchor").innerHTML="";
+  $("#queued").style.display="none";$("#qdock").style.display="none";$("#permdock").style.display="none";
+  $("#ptext").focus();
+  if(!silent)toast("新会话（草稿按会话隔离保存）");
+}
+function openChat(){go("chat");$("#view-chat").classList.remove("welcome");$("#seedMsg").style.display="";scrollBottom()}
+function fillPrompt(t){openChat();$("#ptext").value=t;onType($("#ptext"));$("#ptext").focus()}
+
+/* ============ 会话列表（localStorage 模拟 SQLite 持久化） ============ */
+function renderSessions(){
+  const saved=JSON.parse(localStorage.getItem("kilo.sessions")||"null")||SESSIONS;
+  let h="";
+  for(const g in saved){h+=`<div class="dategroup">${g}</div>`;
+    for(const s of saved[g])h+=`<div class="sess ${s.t.includes("SQLite")?"active":""}" onclick="openChat()">
+      <span class="dot ${s.act==="run"?"g":s.act==="warn"?"y":"gr"}"></span><span class="t">${s.t}</span><span class="time">${s.m}</span>
+      <span class="act"><button title="重命名" onclick="event.stopPropagation();toast('行内重命名')">✎</button><button title="导出 Markdown" onclick="event.stopPropagation();toast('已导出转录.md')">⤓</button><button title="删除" onclick="event.stopPropagation();toast('确认删除？（软删 + 可撤销）')">🗑</button></span></div>`}
+  $("#sessList").innerHTML=h;
+}
+
+/* ============ 历史 ============ */
+function hTab(el,k){el.parentNode.querySelectorAll(".htab").forEach(x=>x.classList.remove("active"));el.classList.add("active");renderHistory(k)}
+function renderHistory(k){
+  k=k||"local";
+  const src=k==="cloud"?{"云端":[{t:"支付模块设计",m:"3 天前 · repo: cloud",act:""},{t:"多租户权限方案",m:"上周 · repo: cloud",act:""}]}
+    :k==="wt"?{"Worktree":[{t:"kilo/sqlite-store · 给 SessionStore 加 SQLite 持久化",m:"刚刚",act:"run"}]}:SESSIONS;
+  let h="";
+  for(const g in src){h+=`<div class="dategroup" style="padding-left:2px">${g}</div>`;
+    for(const s of src[g])h+=`<div class="hrow" onclick="openChat()"><span class="dot ${s.act==="run"?"g":s.act==="warn"?"y":"gr"}"></span>
+      <div><div class="t">${s.t}</div><div class="m"><span>sonnet-4.5</span><span>18 messages</span><span>$0.0421</span><span>+214 −36</span></div></div>
+      <div class="r"><span>${s.m}</span><button title="重命名">✎</button><button title="导出">⤓</button><button title="删除">🗑</button></div></div>`}
+  $("#historyList").innerHTML=h;
+}
+function filterHistory(q){toast("按标题过滤："+q)}
+
+/* ============ 设置渲染 ============ */
+let curTab="models",curSub="Agents";
+function renderSettings(){
+  $("#setNav").innerHTML=Object.entries(SETTINGS).map(([k,v])=>`<button class="${k===curTab?"active":""}" onclick="setTab('${k}')">${v.title}</button>`).join("")
+    +`<div style="border-top:1px solid var(--line);margin-top:10px;padding-top:10px"><button class="btn sm" style="width:100%;margin-bottom:6px" onclick="toast('打开项目配置 .kilo/kilo.json')">项目配置</button><button class="btn sm" style="width:100%" onclick="toast('重载配置 / Skills / Agents / Commands')">⟳ 重载</button></div>`;
+  const s=SETTINGS[curTab];let h=`<h3>${s.title}</h3><div class="slead">${s.lead}</div>`;
+  if(s.subtabs)h+=`<div class="subtabs">${s.subtabs.map(t=>`<div class="subtab ${t===curSub?"active":""}" onclick="curSub='${t}';renderSettings()">${t}</div>`).join("")}</div>`;
+  h+=curTab==="behaviour"?renderBehaviour():curTab==="approve"?renderApprove():renderRows(s);
+  $("#setBody").innerHTML=h;
+}
+function setTab(t){curTab=t;renderSettings()}
+function ctl(r){
+  const[label,desc,kind,val,extra]=r;
+  const L=`<div class="l"><div class="n">${label}</div>${desc?`<div class="d">${desc}</div>`:""}</div>`;
+  let c="";
+  if(kind==="sw")c=`<div class="switch ${val==="1"?"on":""}" ${extra==="disabled"?'style="opacity:.45"':""} onclick="${extra==="disabled"?"":"this.classList.toggle('on');toast('已保存该开关')"}"><i></i></div>`;
+  else if(kind==="sel")c=`<select class="sel" onchange="toast('已更新：'+this.value)"><option>${val}</option><option>未设置</option><option>Claude Opus 4.1</option><option>GPT-5</option><option>DeepSeek V3.2</option></select>`;
+  else if(kind==="sel2")c=`<select class="sel">${val.split("|").map(x=>`<option>${x}</option>`).join("")}</select>`;
+  else if(kind==="txt")c=`<input class="tinp" value="${val}">`;
+  else if(kind==="num")c=`<input class="tinp" style="width:90px" value="${val}">`;
+  else if(kind==="rng")c=`<input type="range" class="rng" min="10" max="24" value="${val}" oninput="this.nextElementSibling.textContent=this.value+'px'"> <span style="font-size:11px;color:var(--muted)">${val}px</span>`;
+  else if(kind==="ta")c=`<textarea class="tinp" style="width:340px;height:52px">${val}</textarea>`;
+  else if(kind==="tag")c=`<span class="tag" style="padding:4px 10px">${val}</span>`;
+  else if(kind==="tags")c=`<div class="taglist">${val.split("｜").map(x=>`<span class="tag">${x.trim()} <span class="x">✕</span></span>`).join("")}<button class="btn sm">＋ 添加</button></div>`;
+  else if(kind==="btn")c=`<button class="btn sm" onclick="toast('执行：${label}')">${val}</button>`;
+  else if(kind==="connect")c=`<button class="btn sm primary" onclick="openModal('provider')">连接</button>`;
+  else if(kind==="custom")c=`<button class="btn sm" onclick="openModal('custom')">添加</button>`;
+  else if(kind==="tools")c=`<div class="taglist">${val.split("|").map(x=>`<span class="tag">${x} <span class="switch sm on" onclick="this.classList.toggle('on')"><i></i></span></span>`).join("")}</div>`;
+  else if(kind==="ptag"){const[,pn,src]=val.split("|");c=`<span class="badge gray">${src}</span>${pn==="My Provider"?`<button class="btn sm" onclick="openModal('custom')">编辑</button>`:""}<button class="btn sm danger" onclick="toast('已断开（密钥已清除）')">断开</button>`}
+  return `<div class="srow">${L}<div class="c">${c}</div></div>`;
+}
+function renderRows(s){return s.groups.map(g=>`<div class="sgroup"><div class="gh">${g.name}</div>${g.rows.map(ctl).join("")}</div>`).join("")}
+function renderApprove(){
+  return `<div class="sgroup"><div class="gh">全局</div>${ctl(["单次会话最大花费","超出后暂停并询问","num","5.00"])}</div>
+  <div class="sgroup"><div class="gh">工具权限（allow / ask / deny · 通配例外，命中最严格者生效）</div>
+  ${PERMS.map(p=>{const[tool,desc,lvl,ex,vals]=p;
+    return `<div class="perm-rule"><div class="pl"><div class="n">${tool}</div><div class="d">${desc}</div></div>
+      <select class="tri" onchange="toast('已更新 ${tool} → '+this.value)"><option ${lvl==="allow"?"selected":""}>allow 自动批准</option><option ${lvl==="ask"?"selected":""}>ask 询问</option><option ${lvl==="deny"?"selected":""}>deny 拒绝</option></select></div>
+      ${ex?`<div class="exc"><b style="font-size:11px">${ex==="cmd"?"命令例外":"路径例外"}</b>${vals.split("｜").map(v=>`<div class="er">• <span style="flex:1">${v.trim()}</span><select class="tri"><option>allow</option><option>ask</option><option>deny</option></select><span class="x" style="cursor:pointer;color:var(--faint)">✕</span></div>`).join("")}<div class="er" style="color:var(--blue);cursor:pointer">＋ 添加${ex==="cmd"?"命令":"路径"}</div></div>`:""}`}).join("")}
+  </div>`;
+}
+function renderBehaviour(){
+  if(curSub==="Agents")return `<div class="sgroup"><div class="gh">Agents</div>
+    ${ctl(["默认代理","新会话使用的模式","sel","code"])}
+    <div class="srow"><div class="c" style="width:100%"><button class="btn sm" onclick="toast('导入 .agent.json（≤1MB）')">⤒ 导入 Mode</button><button class="btn sm" onclick="openModal('market')">🧩 浏览市场</button><button class="btn sm primary" onclick="toast('新建模式：name / description / prompt 三步表单')">＋ 新建模式</button></div></div>
+    ${AGENTS.map(a=>`<div class="srow"><div class="l"><div class="n">${a[0]} <span class="badge ${a[3]==="built-in"?"gray":a[3]==="sub"?"run":"ok"}">${a[1]}</span></div><div class="d">${a[2]}</div></div><div class="c"><button class="btn sm" onclick="toast('编辑：prompt/模型/变体/temperature/top_p/max steps/hidden/disabled/每代理权限')">编辑</button><button class="btn sm" onclick="toast('导出 ${a[0]}.agent.json')">⤓</button>${a[3]==="custom"?`<button class="btn sm danger" onclick="toast('确认删除？')">🗑</button>`:""}</div></div>`).join("")}</div>`;
+  if(curSub==="MCP Servers")return `<div class="sgroup"><div class="gh">MCP Servers <button class="btn sm" style="margin-left:auto" onclick="openModal('market')">🧩 市场安装</button><button class="btn sm" onclick="openModal('mcp')">＋ 手动添加</button></div>
+    ${MCPS.map(m=>`<div class="srow"><span class="dot ${m[2]==="connected"?"g":m[2]==="failed"?"r":m[2]==="needs_auth"?"o":"gr"}" title="${m[2]}"></span>
+      <div class="l"><div class="n">${m[0]} <span class="badge gray">${m[1]}</span>${m[2]==="needs_auth"?` <button class="btn sm" onclick="toast('OAuth 授权流程已打开')">Sign in</button>`:""}</div><div class="d" style="font-family:var(--mono)">${m[3]}</div></div>
+      <div class="c"><div class="switch ${m[2]!=="disabled"?"on":""}" onclick="this.classList.toggle('on');toast('连接/断开并重写 mcp.${m[0]}.enabled（按作用域）')"><i></i></div><button class="btn sm" onclick="openModal('mcp')">编辑</button><button class="btn sm danger" onclick="toast('确认删除？')">🗑</button></div></div>`).join("")}</div>
+    <div class="slead">stdio 用 command/args/env；http 与 sse 用 url（+headers）。列表行可展开查看解析后的完整配置。</div>`;
+  if(curSub==="Rules")return `<div class="sgroup"><div class="gh">Rules · 指令文件</div>
+    <div class="srow"><div class="l"><div class="n">已加载指令</div><div class="d">每次请求注入系统提示</div></div><div class="c"><div class="taglist"><span class="tag">./AGENTS.md ✎<span class="x">✕</span></span><span class="tag">~/.kilo/rules/*.md ✎<span class="x">✕</span></span></div></div></div>
+    ${ctl(["添加指令文件","支持 glob 与 URL","tag","./INSTRUCTIONS.md ＋添加"])}
+    ${ctl(["Claude Code 兼容","读写 .claude/ 规则目录","sw","0"])}</div>`;
+  if(curSub==="Workflows")return `<div class="sgroup"><div class="gh">Workflows · 自定义命令（斜杠命令）</div>
+    ${WORKFLOWS.map(w=>`<div class="srow"><div class="l"><div class="n" style="font-family:var(--mono)">${w[0]}</div><div class="d">${w[1]}</div></div>
+      <div class="c"><select class="sel" style="min-width:110px"><option>${w[2]}</option><option>GPT-5</option><option>Sonnet 4.5</option></select><select class="sel" style="min-width:80px"><option>${w[3]}</option><option>low</option><option>high</option></select><button class="btn sm" onclick="toast('模板只读预览；编辑需打开命令文件（.kilo/command/*.md）')">模板</button></div></div>`).join("")}</div>
+    <div class="slead">命令文件放在 <code class="inline">.kilo/command/*.md</code>（项目）或 <code class="inline">~/.kilo/command/</code>（全局）；此处做模型/变体覆盖。</div>`;
+  return `<div class="sgroup"><div class="gh">Skills <button class="btn sm" style="margin-left:auto" onclick="openModal('market')">🧩 浏览市场</button></div>
+    ${SKILLS.map(s=>`<div class="srow"><span class="picon">📘</span><div class="l"><div class="n">${s[0]} <span class="badge ${s[3]==="builtin"?"gray":s[3]==="project"?"ok":"run"}">${s[3]}</span></div><div class="d">${s[1]} · ${s[2]}</div></div><div class="c">${s[3]!=="builtin"?`<button class="btn sm danger" onclick="toast('确认删除该 Skill？')">🗑</button>`:""}</div></div>`).join("")}</div>
+    <div class="sgroup"><div class="gh">Skill 加载路径</div>
+    ${ctl(["Skill Paths","项目/全局技能目录","tags",".kilo/skills/ ｜ ~/.kilo/skills/"])}
+    ${ctl(["Skill URLs","远程技能（git / http）","tags","https://github.com/…/skills ｜ ＋添加"])}</div>`;
+}
+
+/* ============ 模型选择器 ============ */
+function toggleModelPop(){$("#modelPop").classList.toggle("show");$("#shieldPop").classList.remove("show");$("#slashMenu").classList.remove("show");if($("#modelPop").classList.contains("show")){renderModelList("");preview(MODELS[0].items[0])}}
+function renderModelList(q){
+  let h="";
+  for(const g of MODELS){const items=g.items.filter(m=>!q||m.n.toLowerCase().includes(q.toLowerCase())||m.id.includes(q.toLowerCase()));if(!items.length)continue;
+    h+=`<div class="mp-group">${g.g}</div>`+items.map(m=>`<div class="mp-row ${m.id==="claude-sonnet-4.5"?"sel":""}" onclick="pickModel('${m.id}')"><span class="picon" style="width:20px;height:20px;font-size:10px">${m.p[0]}</span><span>${m.n}</span><span class="tags">${m.free?'<span class="free">free</span>':""}<span class="price">${m.in}/${m.out}</span></span><span class="star ${m.star?"on":""}" onclick="event.stopPropagation();this.classList.toggle('on');toast(this.classList.contains('on')?'已收藏':'已取消收藏')">★</span></div>`).join("");}
+  $("#mpList").innerHTML=h||`<div style="padding:16px;color:var(--muted);font-size:12px">无匹配模型 · 去「设置 → 供应商」连接更多</div>`;
+}
+function preview(m){$("#mpPreview").innerHTML=`<h4>${m.n} <span class="star ${m.star?"on":""}">★</span></h4><div class="prov">${m.p}</div>
+  <div class="pr"><span>输入</span><b>${m.in}/M</b></div><div class="pr"><span>输出</span><b>${m.out}/M</b></div><div class="pr"><span>缓存读</span><b>${m.free?"—":"$0.30/M"}</b></div>
+  <div class="kv">上下文窗口 <b>${m.ctx}</b></div><div class="kv">Terminal Bench <b>52.1% · $1.83/attempt</b></div>
+  <div class="cap">${m.r?'<span class="badge gray">reasoning</span>':""}${m.s?'<span class="badge gray">vision</span>':""}<span class="badge gray">tools</span></div>
+  <div class="desc">${m.desc}</div>`}
+function pickModel(id){const m=MODELS.flatMap(g=>g.items).find(x=>x.id===id);$("#modelName").textContent=m.n;$("#modelPop").classList.remove("show");toast("已切换模型："+m.n+"（按会话记忆选择）")}
+function addModelCard(){$("#modelCards").insertAdjacentHTML("beforeend",`<div class="mcard"><div class="mc-grid"><div><label>Model ID</label><input placeholder="model-id"></div><div><label>显示名称</label><input placeholder="Display"></div><div class="cbs"><label><input type="checkbox"> 支持推理</label></div><div class="cbs"><label><input type="checkbox"> 支持图片</label><button class="btn sm" onclick="this.closest('.mcard').remove()">✕</button></div></div></div>`)}
+
+/* ============ 输入框：斜杠 / @ 菜单、快捷键 ============ */
+function renderPop(items){$("#slashMenu").innerHTML=items.map(x=>x.h?`<div class="pm-head">${x.h}</div>`:`<div class="pm-item" onclick="useItem('${x.c}')">${x.i?`<span class="ic">${x.i}</span>`:""}<span class="cmd">${x.c}</span><span class="desc">${x.d}</span>${x.g?`<span class="g">${x.g}</span>`:""}</div>`).join("");$("#slashMenu").classList.add("show")}
+function useItem(c){
+  $("#slashMenu").classList.remove("show");$("#ptext").value="";
+  if(c==="/models")toggleModelPop();
+  else if(c==="/agents")cycleMode(true);
+  else if(c==="/settings")go("settings");
+  else if(c==="/sessions")go("history");
+  else if(c==="/new")newChat();
+  else if(c==="/compact")toast("已插入压缩分割线");
+  else if(c.startsWith("/"))toast("执行命令："+c+"（自定义命令带参数支持）");
+  else $("#ptext").value=c+" ";
+  $("#ptext").focus();
+}
+function onType(el){
+  el.style.height="auto";el.style.height=Math.min(el.scrollHeight,200)+"px";
+  const v=el.value;
+  if(v.startsWith("/"))renderPop(SLASH.filter(x=>x.h||x.c.startsWith(v.toLowerCase())));
+  else if(/(^|\s)@\S*$/.test(v))renderPop(MENTIONS);
+  else $("#slashMenu").classList.remove("show");
+  $("#tokHint").textContent="≈ "+Math.max(1,Math.ceil(v.length/3.6))+" tok · 68.2K/200K";
+}
+const MODES=["Code","Plan","Ask"],VARIANTS=["默认","低","中","高"];let mi=0,vi=0;
+function cycleMode(list){if(list){toast("模式列表：Code（全工具）/ Plan（只读规划→批准执行）/ Ask（只问答）");return}mi=(mi+1)%3;$("#modeName").textContent=MODES[mi];toast(MODES[mi]+" 模式："+({Code:"完整读写与命令",Plan:"只读探索并产出计划，批准后转 Code",Ask:"仅问答，不改文件"}[MODES[mi]]))}
+function cycleVariant(){vi=(vi+1)%4;$("#variantName").textContent=VARIANTS[vi];toast("推理强度变体："+VARIANTS[vi]+"（Shift+Tab 循环）")}
+function attachImage(){$("#pimgs").style.display="flex";toast("图片附件：视觉模型可识别（拖拽/粘贴同样支持；非图片文件转 @mention）")}
+function onKey(e){
+  if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();if(!streaming)send();else toast("运行中：消息将排队（busy 时发送=排队）")}
+  else if(e.key==="Escape"){if(streaming){stopStream();}else closeModal()}
+  else if(e.key==="Tab"&&e.shiftKey){e.preventDefault();cycleVariant()}
+  else if(e.key==="ArrowUp"&&e.target.selectionStart===0){toast("翻阅已发送提示词历史（↑↓，上限 100 条）")}
+}
+function scrollBottom(){const m=$("#messages");m.scrollTop=m.scrollHeight}
+function onScroll(){const m=$("#messages");$("#tobottom").style.display=(m.scrollHeight-m.scrollTop-m.clientHeight>120&&streaming)?"flex":"none"}
+function toggleTimeline(){$("#timeline").classList.toggle("open")}
+
+/* ============ 流式引擎 ============ */
+function hl(code,lang){
+  let s=code.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  s=s.replace(/(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->)/g,'<span class="tc">$1</span>');
+  s=s.replace(/('[^'\n]*'|`[^`]*`|"[^"\n]*")/g,'<span class="ts">$1</span>');
+  s=s.replace(/\b(const|let|var|func|def|return|if|else|import|from|export|class|extends|new|await|async|SELECT|FROM|WHERE|CREATE|TABLE|INSERT|INTEGER|TEXT|NOT|NULL|PRIMARY|KEY|REFERENCES|ON|DELETE|PRAGMA|BEGIN)\b/g,'<span class="tk">$1</span>');
+  s=s.replace(/\b(\d+(\.\d+)?)\b/g,'<span class="tn">$1</span>');
+  s=s.replace(/\b([A-Z][A-Za-z0-9_]*)\b/g,'<span class="tt2">$1</span>');
+  return s;
+}
+function el(h){const t=document.createElement("template");t.innerHTML=h.trim();return t.content.firstChild}
+let streaming=false,waitPermission=null,t0=0,timer=null;
+function setBusy(b){streaming=b;$("#sendBtn").innerHTML=b?'<span class="sq"></span>':"↑";$("#sendBtn").classList.toggle("stop",b);$("#working").classList.toggle("show",b);if(b){t0=Date.now();timer=setInterval(()=>{const s=Math.floor((Date.now()-t0)/1000);$("#workingElapsed").textContent=s+"s"},500)}else clearInterval(timer)}
+function add(h){const node=el(h);$("#streamAnchor").insertAdjacentElement("beforebegin",node);scrollBottom();return node}
+function streamText(parent,html,ms){return new Promise(res=>{const p=document.createElement("p");parent.appendChild(p);const parts=html.split(/(?=<)/);let i=0;const step=()=>{if(i>=parts.length){res();return}p.innerHTML=parts.slice(0,++i).join("")+(i<parts.length?'<span class="cursor"></span>':"");if(i%3===0)scrollBottom();setTimeout(step,ms)};step()})}
+function wait(ms){return new Promise(r=>setTimeout(r,ms))}
+async function send(){
+  const inp=$("#ptext"),text=inp.value.trim();
+  inp.value="";inp.style.height="auto";$("#slashMenu").classList.remove("show");$("#modelPop").classList.remove("show");
+  if(streaming){$("#queued").style.display="flex";toast("运行中：已排队，当前回合结束后自动发送");return}
+  $("#view-chat").classList.remove("welcome");$("#seedMsg").style.display="none";
+  const m=$("#messages");m.querySelector(".seed-extra")?.remove();
+  add(`<div class="msg user"><div class="meta"><span class="badge gray">${$("#modeName").textContent}</span><span>${$("#modelName").textContent}</span><span>${new Date().toTimeString().slice(0,5)}</span></div><div class="bubble">${text.replace(/</g,"&lt;")||"（演示：继续实现 SQLite 持久化）"}</div><div class="hoveract"><button>复制</button><button>Fork</button><button>Revert</button></div></div>`);
+  $("#seedMsg").style.display="none";
+  setBusy(true);$("#workingText").textContent="正在思考…";
+  await demo();
+  setBusy(false);
+}
+function stopStream(){waitPermission&&waitPermission.resolve("abort");setBusy(false);$("#streamAnchor").insertAdjacentHTML("beforebegin",`<div class="outcome" style="border-color:#f2c4c4;background:#fdf5f5">⏹ 已中断（Esc）· 保留已生成内容，可 Revert 或继续</div>`);toast("已中断会话")}
+function allowOnce(){$("#permdock").style.display="none";waitPermission&&waitPermission.resolve("allow")}
+function denyOnce(){$("#permdock").style.display="none";waitPermission&&waitPermission.resolve("deny")}
+function gate(){return new Promise(res=>{waitPermission={resolve:res};$("#permdock").style.display="block";$("#workingText").textContent="等待你的批准…";scrollBottom()})}
+async function demo(){
+  const box=add(`<div class="msg ai"><div class="role"><span class="logo"><img src="logo.png" alt="K"></span>Kilo · <span class="badge gray">${$("#modeName").textContent}</span> · ${$("#modelName").textContent.toLowerCase()}</div></div>`);
+  const md=document.createElement("div");md.className="md";box.appendChild(md);
+  $("#workingText").textContent="正在工作…";
+  await wait(600);
+  const think=el(`<details class="think" open><summary>🧠 思考中…（完成后自动折叠）</summary><div class="body"></div></details>`);box.insertBefore(think,md);
+  await streamText(think.querySelector(".body"),"先建表再迁移：sessions 主键 id，messages 外键级联删除；bun:sqlite 同步 API 足够，避免引入异步改造。",22);
+  await wait(300);think.removeAttribute("open");think.querySelector("summary").textContent="🧠 思考过程（已完成 · 展开查看）";
+  await streamText(md,"<p>好，分三步：建表 → 实现 <code class=\"inline\">SqliteStore</code> → 迁移旧 JSON。</p>",40);
+  box.appendChild(el(`<div class="tool"><div class="thead"><span>📄</span><span class="tname">Read</span><span class="tsub">session/store.ts</span><span class="tstat">128 行<span class="badge ok">完成</span></span></div></div>`));
+  await wait(500);
+  box.appendChild(el(`<div class="tool"><div class="thead"><span>✎</span><span class="tname">Edit</span><span class="tsub">session/sqlite-store.ts</span><span class="tstat"><span class="stat"><span class="a">+64</span><span class="d">−0</span></span><span class="badge run">进行中</span></span></div><div class="tbody"><div class="diff" id="liveDiff"></div></div></div>`));
+  const diffLines=["@@ -0,0 +1,12 @@","+import { Database } from \"bun:sqlite\";","+","+export class SqliteStore {","+  private db: Database;","+","+  constructor(path: string) {","+    this.db = new Database(path);","+    this.db.run(`CREATE TABLE IF NOT EXISTS sessions (","+      id TEXT PRIMARY KEY,","+      title TEXT NOT NULL,","+      cost REAL NOT NULL DEFAULT 0`);","+  }"];
+  const dd=$("#liveDiff");
+  for(const l of diffLines){dd.appendChild(el(`<span class="${l.startsWith("+")?"add":l.startsWith("@")?"hh":"ctx"}">${l.replace(/</g,"&lt;")}</span>`));await wait(90)}
+  await wait(400);
+  $("#workingText").textContent="请求批准：运行测试命令";
+  const g=await gate();
+  if(g==="abort")return;
+  if(g==="deny"){box.appendChild(el(`<div class="outcome" style="border-color:#f2c4c4;background:#fdf5f5">⛔ 已拒绝 · 回合继续（代理改用其他方式或说明原因）</div>`));return}
+  const bash=add(`<div class="tool"><div class="thead"><span>⌨</span><span class="tname">Running Command</span><span class="tsub">跑 store 单元测试</span><span class="tstat"><span class="badge run">运行中</span></span></div><div class="tbody"><pre class="cmd"><span class="p">$</span> bun test ./test/session/sqlite-store.test.ts</pre><pre id="bashOut" style="margin-top:6px"></pre></div></div>`);
+  await wait(500);
+  const out=["bun test v1.2 (k1)","","test/session/sqlite-store.test.ts:","(✓) SqliteStore > 建表幂等 [1.2ms]","(✓) SqliteStore > save/load 往返 [2.4ms]","(✓) SqliteStore > 级联删除消息 [1.1ms]","(✓) 迁移 > 旧 JSON 导入 [3.0ms]",""," 4 pass / 0 fail / 12 expect ()","Ran 4 tests across 1 file. [18.00ms]"];
+  const op=$("#bashOut");
+  for(const l of out){op.textContent+=l+"\n";await wait(140);scrollBottom()}
+  bash.querySelector(".badge").outerHTML='<span class="badge ok">完成</span>';
+  await streamText(md,"<p>测试全绿。表结构如下（<code class=\"inline\">~/.kilo/desktop/kilo.db</code>，WAL 模式）：</p>",30);
+  const cb=el(`<div class="codeblock"><div class="cbhead"><span class="lang">sql · sqlite</span><span class="cp"><button onclick="toast('已复制')">⧉ 复制</button></span></div><pre id="sqlCode"></pre></div>`);
+  md.appendChild(cb);
+  const sql=`CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  cost REAL NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE
+);`;
+  $("#sqlCode").innerHTML=hl(sql,"sql");
+  await wait(700);
+  await streamText(md,"<p>下一步：把 <code class=\"inline\">Session.load()</code> 切到 SqliteStore 并加迁移开关。要我继续吗？</p>",26);
+  box.insertAdjacentHTML("beforeend",`<div class="outcome">✓ 回合完成 · 9 steps · <b>$0.0084</b> · in 66.0K（缓存 93%）/ out 2.2K · <span class="stat"><span class="a">+64</span></span> <button class="btn sm" onclick="openModule('diff')">查看 Diff</button></div>`);
+  $("#costNow").textContent="0.0505";$("#ctxPct").textContent="37%";$("#ctxFill").style.width="37%";
+  $("#workingText").textContent="完成";await wait(600);
+}
+
+/* ============ 右栏模块 ============ */
+const FILES={
+ "src/session/store.ts":`// 会话存储接口（内存实现 → SQLite）\nexport interface Store {\n  load(id: string): Session | null\n  save(s: Session): void\n  delete(id: string): void\n}`,
+ "src/session/sqlite-store.ts":`import { Database } from "bun:sqlite";\n\nexport class SqliteStore implements Store {\n  private db: Database;\n  constructor(path: string) {\n    this.db = new Database(path);\n    this.db.run(SCHEMA);\n  }\n  load(id: string) {\n    return this.db.query(\n      "SELECT * FROM sessions WHERE id = ?"\n    ).get(id);\n  }\n}`,
+ "src/session/index.ts":`export * from "./store";\nexport * from "./sqlite-store";`,
+ "package.json":`{\n  "name": "@kilocode/cli",\n  "scripts": { "test": "bun test" }\n}`
+};
+function openModule(m){
+  $("#rightbar").style.display="flex";$("#shell").classList.remove("no-right");
+  const b=$("#rbBody"),t=$("#rbTitle");
+  if(!m){t.textContent="模块";b.innerHTML=`<div class="rb-hint"><h3>打开一个模块</h3><p>选择项目工具；固定后会在此工作区下次打开时恢复。</p></div>
+    <div class="modcard" onclick="openModule('files')"><span class="ic">🗂</span><div><h4>文件</h4><p>浏览和读取工作区文件（项目感知）</p></div></div>
+    <div class="modcard" onclick="openModule('git')"><span class="ic">⑂</span><div><h4>Git</h4><p>查看仓库状态与改动、生成提交</p></div></div>
+    <div class="modcard" onclick="openModule('browser')"><span class="ic">🌐</span><div><h4>浏览器</h4><p>打开 localhost 或网页地址（代理可操作）</p></div></div>
+    <div class="modcard" onclick="openModule('diff')"><span class="ic">👁</span><div><h4>Diff</h4><p>打开 Git，并选择有改动的文件查看真实 Diff</p></div></div>
+    <div class="modcard" onclick="openModule('usage')"><span class="ic">📈</span><div><h4>用量</h4><p>Token 统计与费用估算（会话/模型细分）</p></div></div>`;return}
+  const mods={
+    files(){t.textContent="文件 · opencode";b.innerHTML=`<div class="tree">
+      <div class="n"><span class="tw">▾</span>📂 opencode</div>
+      <div class="ind"><div class="n"><span class="tw">▾</span>📂 src</div>
+        <div class="ind"><div class="n"><span class="tw">▾</span>📂 session</div>
+          <div class="ind"><div class="n sel" onclick="previewFile('src/session/store.ts',this)">📄 store.ts</div>
+          <div class="n" onclick="previewFile('src/session/sqlite-store.ts',this)">📄 sqlite-store.ts</div>
+          <div class="n" onclick="previewFile('src/session/index.ts',this)">📄 index.ts</div></div></div></div>
+        <div class="n"><span class="tw">▸</span>📂 cli</div><div class="n"><span class="tw">▸</span>📂 server</div></div>
+        <div class="n" onclick="previewFile('package.json',this)">📄 package.json</div>
+        <div class="n">📄 AGENTS.md</div></div>
+      <div class="fileview"><div class="fvh"><b id="fvName">src/session/store.ts</b><span style="margin-left:auto">UTF-8 · LF</span><button class="btn sm" onclick="toast('在系统编辑器打开')">↗ 打开</button></div><pre id="fvCode"></pre></div>`;
+      previewFile("src/session/store.ts");},
+    git(){t.textContent="Git";b.innerHTML=`<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;font-size:12px"><span class="badge gray">⑂ dev</span> <span style="color:var(--muted)">↑1 ↓0 · 干净基线 main</span><button class="btn sm" style="margin-left:auto" onclick="toast('刷新')">↻</button></div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">更改 · 4</div>
+      <div class="grow"><span class="gbadge M">M</span>src/session/store.ts<span style="margin-left:auto" class="stat"><span class="a">+8</span><span class="d">−22</span></span></div>
+      <div class="grow"><span class="gbadge A">A</span>src/session/sqlite-store.ts<span style="margin-left:auto" class="stat"><span class="a">+64</span></span></div>
+      <div class="grow"><span class="gbadge A">A</span>test/session/sqlite-store.test.ts<span style="margin-left:auto" class="stat"><span class="a">+41</span></span></div>
+      <div class="grow"><span class="gbadge M">M</span>package.json<span style="margin-left:auto" class="stat"><span class="a">+1</span></span></div>
+      <textarea class="commitbox" placeholder="提交信息…（🪄 用 AI 生成）">feat(session): SQLite 持久化替换内存 store</textarea>
+      <div style="display:flex;gap:6px;margin-top:8px"><button class="btn primary sm" onclick="toast('git commit 前将请求审批（bash 规则：git * → ask）')">✓ 提交</button><button class="btn sm" onclick="toast('已推送到 origin/dev')">↑ 推送</button><button class="btn sm" onclick="toast('Discard：checkpoint 恢复文件')">✕ 放弃</button></div>`},
+    browser(){t.textContent="浏览器";b.innerHTML=`<div class="urlbar"><input value="http://localhost:54321/session" placeholder="localhost 或网页地址"><button class="btn sm" onclick="toast('导航中…（代理也可驱动此浏览器：点击/截图/DOM 引用回聊天）')">→</button></div>
+      <div class="fakepage"><span style="font-size:26px">🖥</span>页面渲染区<div style="font-size:11px">代理可操作：click / screenshot / 元素引用作为 @mention 附加到输入框</div><button class="btn sm" onclick="toast('已把选中元素引用附加到输入框')">🎯 引用元素</button></div>`},
+    diff(){t.textContent="Diff · 本回合";b.innerHTML=`<div style="display:flex;gap:6px;margin-bottom:8px;font-size:11.5px;align-items:center"><select class="sel" style="min-width:120px;padding:3px 8px"><option>本会话改动</option><option>工作区 vs HEAD</option><option>分支 vs main</option></select><span class="stat"><span class="a">+214</span><span class="d">−36</span></span></div>
+      <div class="grow sel" style="background:#fff"><span class="gbadge A">A</span>src/session/sqlite-store.ts</div>
+      <div class="fileview" style="margin-top:6px"><div class="fvh"><b>sqlite-store.ts</b><span style="margin-left:auto"><button class="btn sm">内联</button> <button class="btn sm">并排</button></span></div>
+      <div class="diff" style="padding:8px;overflow:auto"><span class="hh">@@ -0,0 +1,6 @@</span><span class="add">+import { Database } from "bun:sqlite";</span><span class="add">+</span><span class="add">+export class SqliteStore {</span><span class="add">+  private db: Database;</span><span class="ctx">   constructor() {}</span><span class="del">-  // TODO</span><span class="add">+  } else {}</span></div></div>
+      <div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm" onclick="toast('已还原该文件（checkpoint）')">还原文件</button><button class="btn sm" onclick="toast('已应用改动到工作树')">应用</button><button class="btn sm" onclick="toast('切换 Markdown 渲染（对 .md 文件生效）')">MD</button></div>`},
+    usage(){t.textContent="用量";b.innerHTML=`<div class="ucard"><h5>本会话</h5><div class="big">$0.0421</div><div class="sub">18 messages · 9 steps · claude-sonnet-4.5</div></div>
+      <div class="ucard"><h5>上下文</h5><div class="meter"><i style="width:34%"></i></div><div class="sub">68.2K / 200K（34%）· 预留输出 24K · 阈值 92% 自动压缩</div></div>
+      <div class="ucard"><h5>Token 细分（本会话）</h5><table class="usage-table"><tr><th></th><th>输入</th><th>缓存读</th><th>输出</th><th>推理</th><th>费用</th></tr><tr><td>sonnet-4.5</td><td>4.8K</td><td>61.2K</td><td>2.2K</td><td>0.8K</td><td>$0.0421</td></tr><tr><td>gpt-5-mini<small>（小任务）</small></td><td>1.1K</td><td>—</td><td>0.3K</td><td>—</td><td>$0.0004</td></tr></table></div>
+      <div class="ucard"><h5>吞吐</h5><div class="sub">平均 42.1 tok/s · 缓存命中率 93% · 重试 1 次（429 后 2s 恢复）</div></div>`}
+  };
+  mods[m]&&mods[m]();
+}
+function closeModule(){$("#rbBody").innerHTML="";openModule()}
+function previewFile(p,node){
+  $$(".tree .n").forEach(x=>x.classList.remove("sel"));if(node)node.classList.add("sel");
+  $("#fvName").textContent=p;$("#fvCode").innerHTML=hl(FILES[p]||"",p.split(".").pop());
+}
+
+/* ============ 启动 ============ */
+renderSessions();openModule();newChat(true);
+
+</script>
+</body>
+</html>
