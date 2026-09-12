@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Kilo",
+  "version": "0.1.0",
+  "identifier": "ai.kilo.desktop",
+  "build": {
+    "beforeDevCommand": "bun run dev:vite",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run build:vite",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Kilo",
+        "width": 1480,
+        "height": 930,
+        "minWidth": 860,
+        "minHeight": 560,
+        "decorations": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"],
+    "externalBin": ["binaries/kilo"],
+    "resources": ["binaries/tree-sitter/**/*", "binaries/ffmpeg/**/*", "binaries/kilo-sandbox-mutation-worker.js"]
+  }
+}

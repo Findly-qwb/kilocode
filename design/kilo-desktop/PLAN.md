@@ -17,12 +17,12 @@
 │  └───────────────┬──────────────────────┬──────────────┘                  │
 │             SSE/HTTP（@kilocode/sdk）  invoke()（少量宿主命令）              │
 │  ┌───────────────▼──────────┐  ┌────────▼─────────┐                       │
-│  │ sidecar: kilo serve      │  │ tauri-plugin-sql │                       │
-│  │ packages/opencode 二进制  │  │ （桌面态 SQLite） │                       │
+│  │ sidecar: kilo serve      │  │ tauri-plugin-    │                       │
+│  │ packages/opencode 二进制  │  │ store（UI 态）    │                       │
 │  │ HTTP + SSE · loopback    │  └──────────────────┘                       │
 │  │ + basic auth · :0 随机端口│                                             │
 │  └───────────────┬──────────┘                                              │
-│         会话/消息/权限/配置 持久化（opencode 自身 storage）                    │
+│      会话/消息/权限/配置持久化 = kilo CLI 自带 kilo.db（opencode storage）    │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -33,7 +33,7 @@
 | 后端 | 复用 `packages/opencode` 构建的 `kilo` 单二进制，以 Tauri sidecar 方式 spawn `kilo serve --port 0` | 与 VS Code 扩展同一接入模式（`server-manager.ts:121` 已验证）；HTTP+SSE + basic auth（`kilo` / `KILO_SERVER_PASSWORD`，`server/auth.ts`）现成可用；不重复造 agent 运行时 |
 | 前端 | 直接移植 `packages/kilo-vscode/webview-ui`（SolidJS）+ `packages/kilo-ui` | webview-ui 本来就是 Solid；全部聊天/工具卡/设置/审批 UI 已实现，移植成本远低于重写 |
 | 传输层 | 新建 `desktop-host` 适配包，实现与 `VSCodeContext` 相同的 `postMessage/onMessage` 协议 | 唯一接缝在 `context/vscode.tsx`（一个 `VSCodeContextValue` 接口）；其余组件对宿主无感知 |
-| 会话持久化 | 会话/消息/权限/配置由 opencode 后端 storage 负责；桌面层 SQLite（tauri-plugin-sql）只存 UI 态 | 避免双写不一致；后端已有会话 API（分页/fork/revert/export） |
+| 会话持久化 | 全部持久化直接使用 `packages/opencode` 打包出的 kilo CLI 自带数据库（`kilo.db`，`Global.Path.data/kilo.db`，bun:sqlite + WAL），与 CLI/扩展同库互通；桌面层不再单独存会话数据，SQLite（tauri-plugin-sql）只存 UI 态 | 单一事实来源、无双写；后端已有会话 API（分页/fork/revert/export）；桌面与 CLI 共享同一份历史 |
 | 窗口 | Tauri 2.x + `WebviewWindow`；右栏「浏览器」模块用子 webview 叠加 | Tauri 2 sidecar/updater/tray/global-shortcut 均为一等插件 |
 
 ### 消息桥设计（关键复用点）
@@ -53,7 +53,7 @@ webview-ui 现有协议是 `WebviewMessage`（~180 个请求）/ `ExtensionMessa
 | 能力 | 插件/机制 | 说明 |
 |---|---|---|
 | sidecar 生命周期 | `tauri-plugin-shell` | 启动 spawn、健康探测（GET `/global/health`）、崩溃指数退避重启、退出时杀进程组（防 PTY 泄漏，同扩展侧教训） |
-| SQLite | `tauri-plugin-sql` | 表：`ui_state`（窗口几何/折叠态/右栏模块）、`drafts`、`recent_projects`、`attachments_cache`、`update_log` |
+| SQLite | `tauri-plugin-sql` | **仅 UI 态**（会话数据在 CLI 的 `kilo.db`，不重复存）。表：`ui_state`（窗口几何/折叠态/右栏模块）、`drafts`、`recent_projects`、`attachments_cache`、`update_log` |
 | 窗口 | core | 无边框/透明标题栏自绘（对应原型 titlebar）、多窗口、记住每项目窗口布局 |
 | 托盘 + 全局快捷键 | `tray-icon`、`global-shortcut` | 后台运行、⌘N 新会话、⌘, 设置 |
 | 单实例 | `single-instance` | 二次启动聚焦已有窗口并透传 deep link |
@@ -105,7 +105,7 @@ webview-ui 现有协议是 `WebviewMessage`（~180 个请求）/ `ExtensionMessa
 ### M2 会话与持久化（P0）
 | # | 功能点 | 来源 |
 |---|---|---|
-| 2.1 | 会话由后端 storage 持久化（SQLite 语义：WAL、重启不丢）；桌面层 SQLite 存 UI 态/草稿/最近项目 | ② |
+| 2.1 | 会话持久化 = CLI 引擎自带 `kilo.db`（`storage/db.ts:35`，`Global.Path.data/kilo.db`，WAL，重启不丢；与 CLI/VS Code 扩展同库）；桌面层 SQLite 只存 UI 态/草稿/最近项目 | ② |
 | 2.2 | 左栏：项目分组（多项目切换）、会话列表按今天/昨天/本周/更早分组、相对时间、活动状态点（运行/需输入/错误/空闲） | ①② |
 | 2.3 | 会话操作：行内重命名、导出 Markdown、删除（确认+软删）、hover 快捷按钮 | ① |
 | 2.4 | 历史视图：本地/云端/Worktree 三 tab、搜索、仅当前仓库过滤、分页加载 | ① |
@@ -164,7 +164,7 @@ webview-ui 现有协议是 `WebviewMessage`（~180 个请求）/ `ExtensionMessa
 | 6.10 | 远程服务：远程控制开关+状态、会话分享 manual/auto/disabled、开机自启 | ① |
 | 6.11 | 迁移向导：从 Roo Code 导入（数据扫描→选择→进度→汇总/强制重导/复制报告） | ① |
 | 6.12 | 实验性：formatter/LSP/batch/图像生成+模型/共享看板/notebook/工具 kill-switch 列表/MCP 超时 | ①② |
-| 6.13 | 关于：版本、CLI 服务器状态+端口、社区链接、数据存储路径（SQLite 位置） | ① |
+| 6.13 | 关于：版本、CLI 服务器状态+端口、社区链接、数据存储路径（CLI `kilo.db` 位置） | ① |
 
 ### P2（明确延后）
 - Agent Manager（多 worktree 编排、section、评审面板）——桌面版可作为独立窗口二期实现，协议已在 `types/messages/agent-manager.ts`。

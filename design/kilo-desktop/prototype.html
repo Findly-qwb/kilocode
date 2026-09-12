@@ -618,7 +618,7 @@ select.tri{border:1px solid var(--line2);border-radius:6px;padding:2px 6px;font-
         <section class="view" id="view-history">
           <div class="page">
             <h2>历史会话</h2>
-            <div class="lead">本地 SQLite 持久化 · 支持云端同步与 Worktree 会话</div>
+            <div class="lead">本地持久化（CLI 引擎自带 kilo.db · WAL） · 支持云端同步与 Worktree 会话</div>
             <div class="htabs">
               <div class="htab active" onclick="hTab(this,'local')">本地</div>
               <div class="htab" onclick="hTab(this,'cloud')">云端</div>
@@ -982,7 +982,7 @@ const SETTINGS={
   ["导入设置","","btn","导入…"],
   ["从 Roo Code 导入","迁移历史会话与规则","btn","开始迁移向导"],
   ["重置全部设置","危险操作","btn","重置"],
-  ["数据存储","会话/消息持久化于本地 SQLite：~/.kilo/desktop/kilo.db（WAL）；附件存 ~/.kilo/desktop/attachments/","tag","打开目录"]]}]}
+     ["数据存储","会话/消息持久化于 CLI 引擎自带数据库（~/.local/share/kilo/kilo.db，WAL，与 CLI/扩展同库）；附件缓存于 ~/.kilo/desktop/attachments/","tag","打开目录"]]}]}
 };
 const PERMS=[
  ["外部目录","访问工作区之外的路径","ask","path","/Users/findly/Downloads/**"],
@@ -1028,7 +1028,7 @@ function newChat(silent){
 function openChat(){go("chat");$("#view-chat").classList.remove("welcome");$("#seedMsg").style.display="";scrollBottom()}
 function fillPrompt(t){openChat();$("#ptext").value=t;onType($("#ptext"));$("#ptext").focus()}
 
-/* ============ 会话列表（localStorage 模拟 SQLite 持久化） ============ */
+/* ============ 会话列表（localStorage 模拟后端 kilo.db 持久化） ============ */
 function renderSessions(){
   const saved=JSON.parse(localStorage.getItem("kilo.sessions")||"null")||SESSIONS;
   let h="";
@@ -1230,7 +1230,7 @@ async function demo(){
   const op=$("#bashOut");
   for(const l of out){op.textContent+=l+"\n";await wait(140);scrollBottom()}
   bash.querySelector(".badge").outerHTML='<span class="badge ok">完成</span>';
-  await streamText(md,"<p>测试全绿。表结构如下（<code class=\"inline\">~/.kilo/desktop/kilo.db</code>，WAL 模式）：</p>",30);
+  await streamText(md,"<p>测试全绿。表结构如下（<code class=\"inline\">~/.local/share/kilo/kilo.db</code>，WAL 模式）：</p>",30);
   const cb=el(`<div class="codeblock"><div class="cbhead"><span class="lang">sql · sqlite</span><span class="cp"><button onclick="toast('已复制')">⧉ 复制</button></span></div><pre id="sqlCode"></pre></div>`);
   md.appendChild(cb);
   const sql=`CREATE TABLE IF NOT EXISTS sessions (
