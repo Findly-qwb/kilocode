@@ -29,8 +29,12 @@ export async function writeSkill(dir: string, name: string, desc: string) {
   return invoke("write_skill", { dir, name, desc })
 }
 
-export async function writeAgent(dir: string, name: string, desc: string, body: string) {
-  return invoke("write_agent", { dir, name, desc, body })
+export async function writeAgent(dir: string, name: string, desc: string, body: string, mode?: string) {
+  return invoke("write_agent", { dir, name, desc, body, mode })
+}
+
+export async function removeAgent(dir: string, name: string) {
+  return invoke("remove_agent", { dir, name })
 }
 
 export async function toggleSkill(path: string, on: boolean) {
@@ -49,3 +53,17 @@ export const win = () => getCurrentWindow()
 export const winMin = () => tauri && win().minimize()
 export const winMax = () => tauri && win().toggleMaximize()
 export const winClose = () => (tauri ? win().close() : window.close())
+
+let granted: boolean | undefined
+export async function notifyOS(title: string, body: string) {
+  if (!tauri) return
+  if (localStorage.getItem("ui.osNotify") === "0") return
+  try {
+    const n = await import("@tauri-apps/plugin-notification")
+    if (granted === undefined) granted = (await n.isPermissionGranted()) || (await n.requestPermission()) === "granted"
+    if (!granted) return
+    const focused = await win().isFocused().catch(() => false)
+    if (focused && !document.hidden) return
+    n.sendNotification({ title, body })
+  } catch {}
+}

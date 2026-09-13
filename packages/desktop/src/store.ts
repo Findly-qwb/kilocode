@@ -1,5 +1,4 @@
 import type {
-  AgentV2Info,
   Command,
   Config,
   FilePartInput,
@@ -13,6 +12,8 @@ import type {
 } from "@kilocode/sdk/v2/types"
 import { createSignal, batch } from "solid-js"
 import { client, directory, onEvent } from "./client"
+import { notifyOS } from "./host"
+import { vcsRefresh } from "./vcs"
 
 export type Msg = { info: Message; parts: Part[] }
 export type Pending = { id: string; sessionID: string; permission: string; patterns: string[]; always: string[]; metadata?: Record<string, unknown> }
@@ -48,19 +49,17 @@ const [permissions, setPermissions] = createSignal<Pending[]>([])
 const [questions, setQuestions] = createSignal<Question[]>([])
 const [providers, setProviders] = createSignal<{ all: Provider[]; connected: string[] }>({ all: [], connected: [] })
 const [model, setModelRaw] = createSignal<ModelRef | undefined>(savedModels["*"])
-const [autoApprove, setAutoApproveRaw] = createSignal(localStorage.getItem("autoApprove") === "true")
+const [autoApprove, setAutoApproveRaw] = createSignal(saved("autoApprove", false))
 const [error, setError] = createSignal("")
 const [toastMsg, setToastMsg] = createSignal("")
-const [agents, setAgents] = createSignal<AgentV2Info[]>([])
-const [agent, setAgentRaw] = createSignal(localStorage.getItem("agent") ?? "")
+const [agents, setAgents] = createSignal<{ id: string; description?: string; mode: string; builtIn: boolean }[]>([])
+const [agent, setAgentRaw] = createSignal(saved("agent", ""))
 const [todos, setTodos] = createSignal<Record<string, Todo[]>>({})
 const [commands, setCommands] = createSignal<Command[]>([])
-const [theme, setThemeRaw] = createSignal<Theme>(
-  ((t) => (t === "light" || t === "dark" ? t : "system"))(localStorage.getItem("theme")),
-)
+const [theme, setThemeRaw] = createSignal<Theme>(saved<Theme>("theme", "system"))
 const [view, setViewRaw] = createSignal<View>("chat")
-const [leftFold, setLeftFoldRaw] = createSignal(localStorage.getItem("leftFold") === "true")
-const [rightFold, setRightFoldRaw] = createSignal(localStorage.getItem("rightFold") !== "false")
+const [leftFold, setLeftFoldRaw] = createSignal(saved("leftFold", false))
+const [rightFold, setRightFoldRaw] = createSignal(saved("rightFold", false))
 const [module, setModuleRaw] = createSignal<Module>((saved("module", "") || "") as Module)
 const [drafts, setDraftsRaw] = createSignal<Record<string, string>>(saved("drafts", {}))
 const [queue, setQueue] = createSignal<Record<string, Queued[]>>({})
@@ -124,6 +123,8 @@ export const store = {
   unqueue,
   dequeue,
   open: openSession,
+  load: loadMessages,
+  children: (id: string) => client()?.session.children({ sessionID: id, directory: directory() }).then((r) => r.data ?? []),
   newSession,
   send,
   command,
@@ -143,7 +144,7 @@ export const store = {
   rejectQuestion,
   removeSession,
   refresh: bootstrap,
-  reload: bootstrap,
+  reload: () => bootstrap(true),
   statusOf,
   costOf,
   notify,
@@ -287,11 +288,16 @@ onEvent((e) => {
     }
     case "session.idle": {
       const id = p.properties.sessionID
+      const wasBusy = busy().has(id)
       setBusy((s) => {
         const next = new Set(s)
         next.delete(id)
         return next
       })
+      if (wasBusy && !queue()[id]?.length) {
+        const s = sessions().find((x) => x.id === id)
+        void notifyOS("回合完成", s?.title ?? "Kilo 会话")
+      }
       void refreshSessions()
       flushQueue(id)
       return
@@ -308,6 +314,7 @@ onEvent((e) => {
         return
       }
       setPermissions((list) => [...list, req as Pending])
+      void notifyOS("等待批准", `${req.permission} · ${req.patterns?.[0] ?? ""}`)
       return
     }
     case "permission.replied": {
@@ -316,6 +323,7 @@ onEvent((e) => {
     }
     case "question.asked": {
       setQuestions((list) => [...list, p.properties])
+      void notifyOS("代理提问", p.properties.questions?.[0]?.question ?? "")
       return
     }
     case "question.replied":
@@ -623,12 +631,15 @@ async function removeSession(id: string) {
 
 // ---------- 引导加载 ----------
 
-async function bootstrap() {
+async function bootstrap(force?: boolean) {
   const c = client()
   if (!c) return
-  await Promise.all([refreshSessions(), loadProviders(), loadCommands(), loadConfig(), loadProfile()])
-  const ag = await c.v2.agent.list({ location: { directory: directory() } }).catch(() => undefined)
-  setAgents((ag?.data?.data ?? []).filter((a) => a.mode !== "subagent" && !a.hidden))
+  await Promise.all([refreshSessions(), loadProviders(), loadCommands(), loadConfig(), loadProfile(force)])
+  void vcsRefresh()
+  const ag = await c.app.agents({ directory: directory() }).catch(() => undefined)
+  const list = (ag?.data ?? []).filter((a) => !a.hidden && !a.deprecated)
+  setAgents(list.map((a) => ({ id: a.name, description: a.description, mode: a.mode, builtIn: a.native ?? a.source !== "config" })))
+  if (agent() && !list.some((a) => a.name === agent() && a.mode !== "subagent")) setAgent("")
 }
 
 async function loadProviders() {
@@ -657,13 +668,19 @@ async function loadConfig() {
   setConfig(res?.data ?? {})
 }
 
-async function loadProfile() {
+async function loadProfile(force?: boolean) {
+  if (!force && profile()) return
   const c = client()
   if (!c) return
+  const st = await c.kilo.authStatus({ directory: directory() }).catch(() => undefined)
+  if (!st?.data?.authenticated) {
+    setProfile({ loggedIn: false })
+    return
+  }
   const res = await c.kilo.profile({ directory: directory() }).catch(() => undefined)
   const d = res?.data
   if (!d) {
-    setProfile({ loggedIn: false })
+    setProfile({ loggedIn: true })
     return
   }
   setProfile({
@@ -676,10 +693,11 @@ async function loadProfile() {
   })
 }
 
-export async function saveConfig(patch: Config) {
+export async function saveConfig(patch: Record<string, unknown>) {
   const c = client()
   if (!c) return false
-  const ok = await c.config.update({ directory: directory(), config: patch }).then(
+  // eslint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- dynamic partial config keys are a genuine boundary; backend deep-merges the bag
+  const ok = await c.config.update({ directory: directory(), config: patch as unknown as Config }).then(
     () => true,
     () => false,
   )

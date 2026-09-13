@@ -3,11 +3,13 @@ import { listen } from "@tauri-apps/api/event"
 
 export type Info = { port: number; password: string; baseUrl: string }
 
-export const serverInfo = () => invoke<Info | null>("server_info")
+const tauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 
-export const onReady = (cb: (info: Info) => void) => listen<Info>("backend://ready", (e) => cb(e.payload))
+export const serverInfo = async () => (tauri ? invoke<Info | null>("server_info") : null)
 
-export const onExit = (cb: (reason: string) => void) => listen<string>("backend://exit", (e) => cb(e.payload))
+export const onReady = (cb: (info: Info) => void) => (tauri ? listen<Info>("backend://ready", (e) => cb(e.payload)) : async () => {})
+
+export const onExit = (cb: (reason: string) => void) => (tauri ? listen<string>("backend://exit", (e) => cb(e.payload)) : async () => {})
 
 export const authHeader = (info: Info) => "Basic " + btoa(`kilo:${info.password}`)
 

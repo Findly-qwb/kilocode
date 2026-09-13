@@ -125,15 +125,29 @@ fn toggle_skill(path: String, on: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn write_agent(dir: String, name: String, desc: String, body: String) -> Result<(), String> {
+fn write_agent(dir: String, name: String, desc: String, body: String, mode: Option<String>) -> Result<(), String> {
     check_name(&name)?;
     let root = std::path::Path::new(&dir).join(".kilo").join("agent");
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
-    let text = format!("---\ndescription: {desc}\nmode: primary\n---\n\n{body}\n");
+    let m = mode.as_deref().filter(|s| *s == "subagent").unwrap_or("primary");
+    let text = format!("---\ndescription: {desc}\nmode: {m}\n---\n\n{body}\n");
     std::fs::write(root.join(format!("{name}.md")), text).map_err(|e| e.to_string())
 }
 
 // 删除项目 MCP：只改 <dir>/.kilo/config.json 的 mcp 字段；全局配置里的条目不在范围。
+#[tauri::command]
+fn remove_agent(dir: String, name: String) -> Result<(), String> {
+    check_name(&name)?;
+    let root = std::path::Path::new(&dir).join(".kilo").join("agent");
+    for ext in ["md", "json"] {
+        let p = root.join(format!("{name}.{ext}"));
+        if p.exists() {
+            return std::fs::remove_file(&p).map_err(|e| e.to_string());
+        }
+    }
+    Err(format!("项目 .kilo/agent 中没有「{name}」（内置代理不可删除）"))
+}
+
 #[tauri::command]
 fn remove_mcp(dir: String, name: String) -> Result<(), String> {
     if name.is_empty() || name.contains('/') || name.contains('\\') {
@@ -183,6 +197,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             app.manage(Shared::default());
             app.manage(Opts::default());
@@ -191,7 +206,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            server_info, pick_dir, open_url, write_skill, toggle_skill, write_agent, remove_mcp,
+            server_info, pick_dir, open_url, write_skill, toggle_skill, write_agent, remove_agent, remove_mcp,
             restart_backend, git_cmd
         ])
         .build(tauri::generate_context!())

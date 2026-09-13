@@ -1,12 +1,34 @@
-import { For, Show } from "solid-js"
+import { For, Show, createSignal } from "solid-js"
+import { LayoutDashboard, CreditCard } from "lucide-solid"
 import { store } from "../store"
-import { info } from "../client"
+import { client, directory, info } from "../client"
 import { openModal } from "../ui"
 import { openUrl } from "../host"
 
 export function Profile() {
   const c = () => store.profile()
   const connected = () => store.providers().all.filter((p) => store.providers().connected.includes(p.id))
+  const [authing, setAuthing] = createSignal(false)
+  const [hint, setHint] = createSignal("")
+  async function login() {
+    const cli = client()
+    if (!cli) return
+    setAuthing(true)
+    setHint("正在发起授权（浏览器将自动打开）…")
+    const res = await cli.provider.oauth.authorize({ providerID: "kilo", method: 0, directory: directory() }).then((r) => r.data).catch((e: Error) => {
+      setHint("失败：" + e.message)
+    })
+    if (!res) {
+      setAuthing(false)
+      return
+    }
+    setHint(res.instructions || "请在浏览器完成授权…")
+    const done = await cli.provider.oauth.callback({ providerID: "kilo", method: 0, directory: directory() }).then(() => true).catch(() => false)
+    setAuthing(false)
+    setHint("")
+    await store.reload()
+    store.notify(done && store.profile()?.loggedIn ? "Kilo Gateway 已登录" : "登录未完成")
+  }
   return (
     <section class="view show">
       <div class="page">
@@ -26,12 +48,12 @@ export function Profile() {
             </Show>
           </div>
           <div style="display:flex;gap:8px;margin-top:14px;align-items:center;flex-wrap:wrap">
-            <button class="btn" onClick={() => void openUrl("https://app.kilo.ai/")}>📊 Dashboard</button>
-            <button class="btn primary" onClick={() => void openUrl("https://app.kilo.ai/credits")}>💳 充值</button>
+            <button class="btn" onClick={() => void openUrl("https://app.kilo.ai/")}><LayoutDashboard size={13} strokeWidth={1.8} style="vertical-align:-2px;margin-right:4px" />Dashboard</button>
+            <button class="btn primary" onClick={() => void openUrl("https://app.kilo.ai/credits")}><CreditCard size={13} strokeWidth={1.8} style="vertical-align:-2px;margin-right:4px" />充值</button>
             <button class="btn" onClick={() => { store.setView("settings"); store.notify("在「供应商」页断开各连接即退出本地凭证") }}>退出</button>
             <span style="margin-left:auto;font-size:12px;color:var(--muted)">
               余额 <b style="color:var(--green);font-family:var(--mono)">{c()?.balance != null ? "$" + c()!.balance!.toFixed(2) : "—"}</b>{" "}
-              <button class="btn sm" onClick={() => void store.refresh()}>↻</button>
+              <button class="btn sm" onClick={() => void store.reload()}>↻</button>
             </span>
           </div>
         </div>
@@ -60,22 +82,16 @@ export function Profile() {
           <Show when={!connected().length}><div class="empty">尚未连接任何服务商，去「设置 → 供应商」连接</div></Show>
         </div>
         <div class="pcard">
-          <h4>设备授权登录（新机器）</h4>
-          <div class="devauth">
-            <div class="step">STEP 1 · 在浏览器打开</div>
-            <div class="url">
-              <span class="u">https://app.kilo.ai/devices</span>
-              <button class="btn sm" onClick={() => void navigator.clipboard.writeText("https://app.kilo.ai/devices")}>⧉</button>
-              <button class="btn sm" onClick={() => void openUrl("https://app.kilo.ai/devices")}>打开</button>
+          <h4>Kilo Gateway 登录</h4>
+          <Show when={!authing()} fallback={
+            <div class="devauth">
+              <div class="step">已打开浏览器 · 完成授权后自动检测</div>
+              <div class="wait"><span class="spinner" /><span style="margin-left:8px">{hint()}</span><button class="btn sm" style="margin-left:auto" onClick={() => setAuthing(false)}>取消</button></div>
             </div>
-            <div class="step">STEP 2 · 输入 8 位确认码</div>
-            <div class="code" title="在网页端生成后输入" onClick={() => store.notify("确认码在 app.kilo.ai/devices 页面生成")}>────····</div>
-            <div class="wait">
-              <span class="spinner" />
-              <span style="margin-left:8px">等待授权… 登录成功后可同步云端会话</span>
-              <button class="btn sm" style="margin-left:auto" onClick={() => void store.refresh()}>检查状态</button>
-            </div>
-          </div>
+          }>
+            <div class="slead" style="margin-bottom:10px">登录后可使用统一路由、云端会话同步与用量统计；本地 BYOK 不依赖登录。</div>
+            <button class="btn primary" onClick={() => void login()}>✨ 浏览器授权登录</button>
+          </Show>
         </div>
         <div class="pcard">
           <h4>后端 · CLI 引擎</h4>

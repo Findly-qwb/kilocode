@@ -1,5 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show, onCleanup } from "solid-js"
 import type { SnapshotFileDiff } from "@kilocode/sdk/v2/types"
+import type { LucideIcon } from "lucide-solid"
+import { FolderClosed, Folder, FolderOpen, FileText, GitBranch, Globe, Eye, TrendingUp, Wand2, Monitor, ArrowLeft } from "lucide-solid"
 import { client, directory } from "../client"
 import { store, type Module } from "../store"
 import { vcs, vcsSoon } from "../vcs"
@@ -13,15 +15,22 @@ export function RightBar() {
     <aside class="rightbar">
       <div class="rb-head">
         <span class="ttl">{m() ? ttl() : "模块"}</span>
-        <button class="iconbtn close" title="收起右栏" onClick={() => store.toggleRight()}>✕</button>
+        <Show when={m()}>
+          <button class="iconbtn" style="margin-left:auto" title="返回模块列表" onClick={() => store.setModule("")}><ArrowLeft size={14} strokeWidth={2} /></button>
+        </Show>
+        <button class="iconbtn" classList={{ close: !!m() }} style={m() ? undefined : "margin-left:auto"} title="收起右栏" onClick={() => store.toggleRight()}>✕</button>
       </div>
       <div class="rb-body">
         <Show when={m()} fallback={<ModuleHome />}>
-          {m() === "files" && <FilesPanel />}
-          {m() === "git" && <GitPanel />}
-          {m() === "browser" && <BrowserPanel />}
-          {m() === "diff" && <DiffPanel />}
-          {m() === "usage" && <UsagePanel />}
+          <Show when={directory()} keyed>
+            <>
+              {m() === "files" && <FilesPanel />}
+              {m() === "git" && <GitPanel />}
+              {m() === "browser" && <BrowserPanel />}
+              {m() === "diff" && <DiffPanel />}
+              {m() === "usage" && <UsagePanel />}
+            </>
+          </Show>
         </Show>
       </div>
     </aside>
@@ -29,12 +38,12 @@ export function RightBar() {
 }
 
 function ModuleHome() {
-  const mods: [Module, string, string, string][] = [
-    ["files", "🗂", "文件", "浏览和读取工作区文件（项目感知）"],
-    ["git", "⑂", "Git", "查看仓库状态与改动、生成提交"],
-    ["browser", "🌐", "浏览器", "打开 localhost 或网页地址"],
-    ["diff", "👁", "Diff", "查看会话/工作区/分支改动"],
-    ["usage", "📈", "用量", "Token 统计与费用估算"],
+  const mods: [Module, LucideIcon, string, string][] = [
+    ["files", FolderClosed, "文件", "浏览和读取工作区文件（项目感知）"],
+    ["git", GitBranch, "Git", "查看仓库状态与改动、生成提交"],
+    ["browser", Globe, "浏览器", "打开 localhost 或网页地址"],
+    ["diff", Eye, "Diff", "查看会话/工作区/分支改动"],
+    ["usage", TrendingUp, "用量", "Token 统计与费用估算"],
   ]
   return (
     <>
@@ -45,7 +54,7 @@ function ModuleHome() {
       <For each={mods}>
         {(x) => (
           <button class="modcard" onClick={() => store.setModule(x[0])}>
-            <span class="ic">{x[1]}</span>
+            <span class="ic">{(() => { const Ic = x[1]; return <Ic size={17} strokeWidth={1.8} /> })()}</span>
             <div>
               <h4>{x[2]}</h4>
               <p>{x[3]}</p>
@@ -94,13 +103,13 @@ function TreeNode(props: { dir: string; depth: number }) {
           k.type === "directory" ? (
             <>
               <div class="n" style={{ "padding-left": props.depth * 12 + "px" }} onClick={() => void load()}>
-                <span class="tw">{open() ? "▾" : "▸"}</span>📂 {k.path.replace(/\/$/, "").split(/[\\/]/).at(-1)}
+                <span class="tw">{open() ? "▾" : "▸"}</span><span class="fi"><Folder size={12} strokeWidth={1.8} /></span> {k.path.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || k.path}
               </div>
               <Show when={open()}><TreeNode dir={props.dir ? `${props.dir}/${k.path.replace(/\/$/, "")}` : k.path.replace(/\/$/, "")} depth={props.depth + 1} /></Show>
             </>
           ) : (
             <div class="n" classList={{ sel: store.module() === "files" && pickPath() === (props.dir ? `${props.dir}/${k.path}` : k.path) }} style={{ "padding-left": props.depth * 12 + 10 + "px" }} onClick={() => pickFile(props.dir ? `${props.dir}/${k.path}` : k.path)}>
-              📄 {k.path}
+              <span class="fi"><FileText size={12} strokeWidth={1.8} /></span> {k.path}
             </div>
           )
         }
@@ -116,31 +125,34 @@ async function pickFile(path: string) {
   if (!c) return
   const res = await c.v2.fs.read({ location: { directory: directory() }, path }).catch(() => undefined)
   if (!res) return
-  if (res.data instanceof Blob) {
-    if (IMG.has(ext(path))) {
-      const url = URL.createObjectURL(res.data)
-      setPicked((prev) => {
-        if (prev?.image) URL.revokeObjectURL(prev.image)
-        return { path, html: "", image: url }
-      })
-    } else setPicked({ path, html: `（非文本文件 .${ext(path)}）` })
+  const raw = res.data
+  if (!(raw instanceof Blob)) {
+    setPicked({ path, html: `（非文本文件 .${ext(path)}）` })
     return
   }
-  const text = await res.data.text().catch(() => "")
+  if (IMG.has(ext(path))) {
+    const url = URL.createObjectURL(raw)
+    setPicked((prev) => {
+      if (prev?.image) URL.revokeObjectURL(prev.image)
+      return { path, html: "", image: url }
+    })
+    return
+  }
+  const text = await raw.text().catch(() => "")
   setPicked({ path, html: hl(text.slice(0, 400_000), ext(path)) })
 }
 
 function FilesPanel() {
-  const [root] = createSignal(directory())
   onCleanup(() => {
     const p = picked()
     if (p?.image) URL.revokeObjectURL(p.image)
+    setPicked(undefined)
   })
   return (
     <>
       <div class="tree">
-        <div class="n"><span class="tw">▾</span>📂 {root()?.split(/[\\/]/).at(-1) ?? "未选项目"}</div>
-        <Show when={root()}>
+        <div class="n"><span class="tw">▾</span><span class="fi"><FolderOpen size={12} strokeWidth={1.8} /></span> {directory() ? directory().split(/[\\/]/).filter(Boolean).at(-1) : "未选项目"}</div>
+        <Show when={directory()} keyed>
           <div class="ind">
             <TreeNode dir="" depth={1} />
           </div>
@@ -220,7 +232,7 @@ function GitPanel() {
   return (
     <>
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;font-size:12px">
-        <span class="badge gray">⑂ {vcs().branch || "非仓库"}</span>
+        <span class="badge gray"><GitBranch size={11} strokeWidth={1.8} style="vertical-align:-1px;margin-right:2px" /> {vcs().branch || "非仓库"}</span>
         <span style="color:var(--muted)">· {files().length} 处变更</span>
         <button class="btn sm" style="margin-left:auto" onClick={() => void load()}>↻</button>
       </div>
@@ -243,12 +255,12 @@ function GitPanel() {
           )}
         </For>
       </Show>
-      <textarea class="commitbox" placeholder="提交信息…（🪄 用 AI 生成）" value={msg()} onInput={(e) => setMsg(e.currentTarget.value)} />
+      <textarea class="commitbox" placeholder="提交信息…（点 AI 生成）" value={msg()} onInput={(e) => setMsg(e.currentTarget.value)} />
       <Show when={status()}><div class="rbl">{status()}</div></Show>
       <div style="display:flex;gap:6px;margin-top:8px">
         <button class="btn sm primary" disabled={busy() || !msg().trim()} onClick={() => void commit()}>✓ 提交</button>
         <button class="btn sm" disabled={busy()} onClick={() => void run(["push"], "已推送")}>↑ 推送</button>
-        <button class="btn sm" disabled={busy()} onClick={gen}>🪄 AI</button>
+        <button class="btn sm" disabled={busy()} onClick={gen}><Wand2 size={11} strokeWidth={1.8} style="vertical-align:-1px;margin-right:3px" />AI</button>
         <button class="btn sm danger" disabled={busy() || !open()} title="放弃该文件的改动" onClick={() => void run(["checkout", "--", open() ?? ""], "已放弃")}>✕ 放弃</button>
       </div>
     </>
@@ -268,7 +280,7 @@ function BrowserPanel() {
       </div>
       <Show when={src()} fallback={
         <div class="fakepage" style="height:200px">
-          <span style="font-size:26px">🖥</span>
+          <span style="display:inline-flex"><Monitor size={26} strokeWidth={1.5} /></span>
           <div>输入地址后回车</div>
           <div style="font-size:11px;color:var(--muted)">站点若禁止内嵌，请用外部打开</div>
         </div>
@@ -337,7 +349,11 @@ function DiffPanel() {
   return (
     <>
       <div style="display:flex;gap:6px;margin-bottom:8px;font-size:11.5px;align-items:center">
-        <select class="sel" style="min-width:120px;padding:3px 8px;width:auto" value={src()} onChange={(e) => { setSrc(e.currentTarget.value as unknown as Source); void load() }}>
+        <select class="sel" style="min-width:120px;padding:3px 8px;width:auto" value={src()} onChange={(e) => {
+          const v = e.currentTarget.value
+          setSrc(v === "workspace" ? "workspace" : v === "branch" ? "branch" : "session")
+          void load()
+        }}>
           <option value="session">本会话改动</option>
           <option value="workspace">工作区 vs HEAD</option>
           <option value="branch">分支 vs main</option>
@@ -416,12 +432,11 @@ function UsagePanel() {
   const session = () => store.sessions().find((s) => s.id === store.current())
   const total = createMemo(() => msgs().filter((m) => m.info.role === "assistant").length)
   const rate = createMemo(() => {
-    const list = msgs().filter((m) => m.info.role === "assistant" && (m.info as { time: { completed?: number } }).time.completed)
+    const list = msgs().flatMap((m) => (m.info.role === "assistant" && m.info.time.completed ? [m.info] : []))
     if (!list.length) return 0
     const last = list.at(-1)!
-    const time = last.info.time as unknown as { created: number; completed: number }
-    const secs = (time.completed - time.created) / 1000
-    return secs > 0 && last.info.role === "assistant" ? Math.round(last.info.tokens.output / secs) : 0
+    const secs = (last.time.completed! - last.time.created) / 1000
+    return secs > 0 ? Math.round(last.tokens.output / secs) : 0
   })
   const fmtK = (n: number) => (n >= 1000 ? (n / 1000).toFixed(1) + "K" : String(n))
   const pct = createMemo(() => {
@@ -445,19 +460,21 @@ function UsagePanel() {
         <div class="ucard">
           <h5>Token 细分（本会话）</h5>
           <table class="usage-table">
-            <tr><th></th><th>输入</th><th>缓存读</th><th>输出</th><th>推理</th><th>费用</th></tr>
-            <For each={rows()}>
-              {([id, r]) => (
-                <tr>
-                  <td>{id}</td>
-                  <td>{fmtK(r.inn)}</td>
-                  <td>{fmtK(r.cache)}</td>
-                  <td>{fmtK(r.out)}</td>
-                  <td>{r.reason ? fmtK(r.reason) : "—"}</td>
-                  <td>${r.cost.toFixed(4)}</td>
-                </tr>
-              )}
-            </For>
+            <tbody>
+              <tr><th></th><th>输入</th><th>缓存读</th><th>输出</th><th>推理</th><th>费用</th></tr>
+              <For each={rows()}>
+                {([id, r]) => (
+                  <tr>
+                    <td>{id}</td>
+                    <td>{fmtK(r.inn)}</td>
+                    <td>{fmtK(r.cache)}</td>
+                    <td>{fmtK(r.out)}</td>
+                    <td>{r.reason ? fmtK(r.reason) : "—"}</td>
+                    <td>${r.cost.toFixed(4)}</td>
+                  </tr>
+                )}
+              </For>
+            </tbody>
           </table>
         </div>
       </Show>

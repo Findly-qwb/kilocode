@@ -1,12 +1,19 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js"
 import { createStore } from "solid-js/store"
-import type { FilePartInput, Part } from "@kilocode/sdk/v2/types"
+import { Popover } from "@kobalte/core/popover"
+import type { AssistantMessage, FilePartInput, Part } from "@kilocode/sdk/v2/types"
+import type { LucideIcon } from "lucide-solid"
+import {
+  AlertTriangle, BookOpen, Brain, Box, ChevronRight, CircleHelp, Compass, Copy, FileText, GitBranch, GitFork, Globe, List, ListChecks, ThumbsDown, ThumbsUp,
+  MessageSquare, Pencil, RotateCcw, Scissors, Search, Settings, Shield, SquareTerminal, TrendingUp, Wand2, Puzzle,
+} from "lucide-solid"
 import logo from "../assets/logo.png"
 import { client, directory } from "../client"
 import { store, type Msg, type Question, type ModelRef } from "../store"
 import { vcs } from "../vcs"
-import { setSettingsTab } from "../ui"
-import { openUrl } from "../host"
+import { permLevel } from "../perm"
+import { openModal, setSettingsTab } from "../ui"
+import { openUrl, openPath } from "../host"
 import { md } from "../util"
 
 type Entry = { name: string; mime: string; url: string; img: boolean }
@@ -43,12 +50,48 @@ async function toData(file: File) {
 
 const ext = (p: string) => p.split(".").at(-1)?.toLowerCase() ?? ""
 
+function openRef(url: string) {
+  if (url.startsWith("file://")) void openPath(url.slice(7))
+  else if (url.startsWith("/")) void openPath(url)
+}
+function retryWait(part: Extract<Part, { type: "retry" }>): number | undefined {
+  const d = part.error.data
+  const hdr = d.responseHeaders ? { ...d.responseHeaders } : undefined
+  const ra = hdr && (hdr["retry-after"] ?? hdr["Retry-After"])
+  const meta = d.metadata ? { ...d.metadata } : undefined
+  const sec = Number(ra ?? meta?.["retry_after_seconds"])
+  return Number.isFinite(sec) && sec > 0 ? Math.ceil(sec) : undefined
+}
+
 const bridge = { put: (_v: string) => {} }
+
+type VoteMap = Record<string, "up" | "down">
+function loadVotes(): VoteMap {
+  const raw = localStorage.getItem("msgVotes")
+  const out: VoteMap = {}
+  if (!raw) return out
+  const v: unknown = JSON.parse(raw)
+  if (v && typeof v === "object") {
+    const box: Record<string, unknown> = { ...v }
+    for (const k of Object.keys(box)) { const d = box[k]; if (d === "up" || d === "down") out[k] = d }
+  }
+  return out
+}
+const [votes, setVotes] = createSignal(loadVotes())
+function vote(id: string, dir: "up" | "down") {
+  setVotes((v) => {
+    const next = { ...v }
+    if (next[id] === dir) delete next[id]
+    else next[id] = dir
+    localStorage.setItem("msgVotes", JSON.stringify(next))
+    return next
+  })
+}
 
 export function Chat() {
   const [ui, setUi] = createStore({
     draft: "" as string,
-    menu: "" as "" | "slash" | "mention" | "model" | "shield" | "mode",
+    menu: "" as "" | "slash" | "mention" | "model" | "shield" | "mode" | "variant",
     hl: 0,
     timeline: false,
     focused: false,
@@ -57,22 +100,21 @@ export function Chat() {
     enhanced: "" as string,
   })
   const [staged, setStaged] = createSignal<Entry[]>([], { equals: false })
-  const [hits, setHits] = createSignal<{ c: string; d: string; i: string }[]>([])
-  const [elapsed, setElapsed] = createSignal("0s")
+  const [hits, setHits] = createSignal<{ c: string; d: string; i: LucideIcon }[]>([])
   const [atBottom, setAtBottom] = createSignal(true)
-  const [thinking, setThinking] = createSignal(false)
+  const [find, setFind] = createStore({ open: false, q: "", cs: false, ww: false, i: 0 })
   let stream!: HTMLDivElement
   let input!: HTMLTextAreaElement
 
   const msgs = () => store.thread(store.current())
   const current = () => store.current()
-  const session = () => store.sessions().find((s) => s.id === current())
+  const session = () => store.sessions().find((s) => s.id === store.current())
   const isBusy = () => store.busy().has(current())
-  const pending = () => store.permissions().find((p) => p.sessionID === current())
-  const question = () => store.questions().find((q) => q.sessionID === current())
+  const pending = () => store.permissions().find((p) => p.sessionID === store.current())
+  const question = () => store.questions().find((q) => q.sessionID === store.current())
   const queued = () => (current() ? (store.queue()[current()] ?? []) : [])
   const welcome = () => !current() && !msgs().length
-  const working = () => (!isBusy() ? "" : pending() ? "等待你的批准…" : thinking() ? "正在思考…" : "正在工作…")
+  const working = () => (!isBusy() ? "" : pending() ? "等待你的批准…" : msgs().at(-1)?.parts.length ? "正在工作…" : "正在思考…")
 
   const key = () => current() || "new"
   bridge.put = (v: string) => putDraft(v)
@@ -85,17 +127,13 @@ export function Chat() {
     store.setDraft(v)
   }
 
+  let prevLen = -1
   createEffect(() => {
-    const b = isBusy()
-    setThinking(b && !msgs().at(-1)?.parts.length)
-    if (!b) return void setElapsed("0s")
-    let n = 0
-    const timer = setInterval(() => setElapsed(`${Math.floor((n += 0.5))}s`), 500)
-    return () => clearInterval(timer)
-  })
-  createEffect(() => {
-    msgs().length
-    scroll(true)
+    const n = msgs().length
+    if (n === prevLen) return
+    const first = prevLen === -1
+    prevLen = n
+    if (first || msgs().at(-1)?.info.role === "user" || atBottom()) scroll(true)
   })
   createEffect(() => {
     const last = msgs().at(-1)?.parts.filter((p) => p.type === "text").at(-1)
@@ -103,9 +141,86 @@ export function Chat() {
   })
   function scroll(force?: boolean) {
     requestAnimationFrame(() => {
+      if (!stream) return
       if (force || atBottom()) stream.scrollTop = stream.scrollHeight
     })
   }
+
+  function matches(): number[] {
+    const q = find.q.trim()
+    if (!q) return []
+    const out: number[] = []
+    msgs().forEach((m, i) => {
+      const hay = textOf(m.parts).join("\n")
+      const needle = find.cs ? q : q.toLowerCase()
+      const text = find.cs ? hay : hay.toLowerCase()
+      if (find.ww) {
+        const esc = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+        if (new RegExp(`\\b${esc}\\b`, find.cs ? "" : "i").test(hay)) out.push(i)
+      } else if (text.includes(needle)) out.push(i)
+    })
+    return out
+  }
+  function ranges(): { all: Range[]; cur: number } {
+    const q = find.q.trim()
+    const all = matches()
+    if (!q || !all.length) return { all: [], cur: 0 }
+    const out: Range[] = []
+    const walker = document.createTreeWalker(stream, NodeFilter.SHOW_TEXT)
+    const target = all[find.i] ?? all[0] ?? 0
+    let msgEl: Element | null = null
+    let cur = -1
+    const re = new RegExp((find.ww ? "\\b" : "") + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + (find.ww ? "\\b" : ""), find.cs ? "g" : "gi")
+    let raw: Node | null
+    while ((raw = walker.nextNode())) {
+      if (!(raw instanceof Text)) continue
+      const node = raw
+      const msg = node.parentElement?.closest(".msg")
+      if (!msg) continue
+      if (msg !== msgEl) {
+        msgEl = msg
+        re.lastIndex = 0
+      }
+      const mi = [...stream.querySelectorAll(".msg")].indexOf(msg)
+      if (mi < 0) continue
+      let mm: RegExpExecArray | null
+      while ((mm = re.exec(node.data))) {
+        const r = document.createRange()
+        r.setStart(node, mm.index)
+        r.setEnd(node, mm.index + mm[0].length)
+        out.push(r)
+        if (mi === target && cur < 0) cur = out.length - 1
+        if (!mm[0].length) re.lastIndex++
+      }
+    }
+    return { all: out, cur: cur < 0 ? 0 : cur }
+  }
+  function applyFind() {
+    if (!("highlights" in CSS)) return
+    const { all, cur } = ranges()
+    CSS.highlights.set("kilo-find", new Highlight(...all))
+    const c = all[cur]
+    CSS.highlights.set("kilo-find-cur", c ? new Highlight(c) : new Highlight())
+    c?.startContainer.parentElement?.scrollIntoView({ block: "center" })
+  }
+  function goFind(delta: number) {
+    const m = matches()
+    if (!m.length) return
+    setFind("i", (find.i + delta + m.length) % m.length)
+  }
+  createEffect(() => {
+    find.q
+    find.i
+    find.cs
+    find.ww
+    msgs().length
+    if (!find.open) {
+      CSS.highlights?.delete("kilo-find")
+      CSS.highlights?.delete("kilo-find-cur")
+      return
+    }
+    applyFind()
+  })
 
   async function addFile(file: File) {
     if (file.size > 6_000_000) return store.notify(`文件过大（>6MB）：${file.name}`)
@@ -123,6 +238,32 @@ export function Chat() {
     const list = (res?.data ?? []).slice(0, 30)
     for (const f of list) if (f.file) addRef(f.file)
     store.notify(`已附加 ${list.length} 个变更文件`)
+  }
+
+  function attachText(name: string, text: string) {
+    const bytes = new TextEncoder().encode(text.slice(0, 8000))
+    let bin = ""
+    for (const b of bytes) bin += String.fromCharCode(b)
+    setStaged((list) => [...list, { name, mime: "text/plain", url: `data:text/plain;base64,${btoa(bin)}`, img: false }])
+  }
+  function attachTerminal() {
+    for (let i = msgs().length - 1; i >= 0; i--) {
+      for (let j = msgs()[i].parts.length - 1; j >= 0; j--) {
+        const p = msgs()[i].parts[j]
+        if (p.type === "tool" && p.tool === "bash" && p.state.status === "completed" && p.state.output) {
+          attachText("terminal-output.txt", `$ ${str0(p.state.input?.command)}\n\n${p.state.output}`)
+          return store.notify("已附加最近一次终端输出")
+        }
+      }
+    }
+    store.notify("本会话还没有已完成的终端命令")
+  }
+  const str0 = (v: unknown) => (typeof v === "string" ? v : "")
+  async function attachWorktrees() {
+    const list = (await client()?.worktree.list({ directory: directory() }).catch(() => undefined))?.data ?? []
+    if (!list.length) return store.notify("当前项目没有 worktree")
+    attachText("worktrees.txt", list.map((w) => `${w.directory}${w.managed ? "\t(managed)" : ""}`).join("\n"))
+    store.notify(`已附加 ${list.length} 个 worktree 路径`)
   }
 
   function clear() {
@@ -188,23 +329,12 @@ export function Chat() {
     }
   }
 
-  async function makeWorktree() {
-    const c = client()
-    if (!c || !directory()) return store.notify("请先选择项目文件夹")
-    const name = `kilo/${(session()?.title ?? "chat").slice(0, 20).replace(/[^a-zA-Z0-9\u4e00-\u9fa5]+/g, "-").replace(/^-+|-+$/g, "")}`
-    const created = await c.worktree.create({ directory: directory(), worktreeCreateInput: { name } }).catch(() => undefined)
-    if (!created) return store.notify("创建 Worktree 失败")
-    const dir = created.data?.directory
-    if (!dir) return
-    store.notify("Worktree 已创建：" + name)
-  }
-
   async function exportMd() {
     const list = msgs()
     if (!list.length) return store.notify("还没有消息可导出")
     let out = `# ${session()?.title ?? "会话"}\n\n`
     for (const m of list) {
-      out += m.info.role === "user" ? "## 👤 用户\n\n" : "## 🤖 Kilo\n\n"
+      out += m.info.role === "user" ? "## 用户\n\n" : "## Kilo\n\n"
       for (const p of m.parts) if (p.type === "text" && p.text && !p.synthetic) out += p.text + "\n\n"
     }
     const a = document.createElement("a")
@@ -216,7 +346,7 @@ export function Chat() {
 
   // ---------- slash / mention ----------
 
-  const menuItems = createMemo<{ h?: string; c?: string; d?: string; i?: string; g?: string; pick?: () => void }[]>(() => {
+  const menuItems = createMemo<{ h?: string; c?: string; d?: string; i?: LucideIcon; g?: string; pick?: () => void }[]>(() => {
     if (ui.menu === "slash") {
       const q = ui.draft.slice(1).toLowerCase()
       const acts = [
@@ -233,7 +363,6 @@ export function Chat() {
       ].filter((x) => !q || x.c.slice(1).startsWith(q))
       const cmds = store
         .commands()
-        .filter((x) => x.name !== "init" || !directory())
         .filter((x) => !["new", "sessions", "models", "agents", "variant", "compact", "export", "help", "settings", "goal"].includes(x.name))
         .filter((x) => !q || x.name.startsWith(q))
         .map((x) => ({ c: "/" + x.name, d: x.description ?? "", g: x.source ?? "command" }))
@@ -242,8 +371,10 @@ export function Chat() {
     if (ui.menu === "mention") {
       return [
         { h: "条目" },
-        { c: "@git-changes", d: "附加当前项目变更", i: "⑂", pick: stageChanges },
-        { c: "@past-chats", d: "搜索并引用历史会话", i: "💬", pick: () => store.setView("history") },
+        { c: "@git-changes", d: "附加当前项目变更", i: GitBranch, pick: stageChanges },
+        { c: "@terminal", d: "附加最近一次终端输出", i: SquareTerminal, pick: attachTerminal },
+        { c: "@worktrees", d: "附加 worktree 路径列表", i: GitFork, pick: () => void attachWorktrees() },
+        { c: "@past-chats", d: "搜索并引用历史会话", i: MessageSquare, pick: () => store.setView("history") },
         { h: "文件" },
         ...hits().map((x) => ({ c: x.c, d: x.d, i: x.i, pick: () => useMention(x.d) })),
       ]
@@ -278,12 +409,17 @@ export function Chat() {
   let ftimer: ReturnType<typeof setTimeout>
   function searchFiles(q: string) {
     clearTimeout(ftimer)
-    ftimer = setTimeout(async () => {
-      if (!directory()) return setHits([])
-      const res = await client()
-        ?.v2.fs.find({ location: { directory: directory() }, query: q, type: "file", limit: "10" })
-        .catch(() => undefined)
-      setHits((res?.data?.data ?? []).map((x) => ({ c: x.path.split(/[\\/]/).slice(-2).join("/"), d: x.path.replace(/\\/g, "/"), i: "📄" })))
+    ftimer = setTimeout(() => {
+      void (async () => {
+        if (!directory()) {
+          setHits([])
+          return
+        }
+        const res = await client()
+          ?.v2.fs.find({ location: { directory: directory() }, query: q, type: "file", limit: "10" })
+          .catch(() => undefined)
+        setHits((res?.data?.data ?? []).map((x) => ({ c: x.path.split(/[\\/]/).slice(-2).join("/"), d: x.path.replace(/\\/g, "/"), i: FileText })))
+      })()
     }, 180)
   }
 
@@ -319,7 +455,7 @@ export function Chat() {
       if (e.key === "ArrowUp") return e.preventDefault(), setUi("hl", (ui.hl - 1 + list.length) % Math.max(1, list.length))
       if (e.key === "Enter" || e.key === "Tab") {
         const hit = list.at(ui.hl)
-        if (e.key === "Tab" || (e.key === "Enter" && (ui.menu === "mention" || ui.draft.startsWith("/") && !ui.draft.includes(" ")))) {
+        if (e.key === "Tab" || (e.key === "Enter" && (ui.menu === "mention" || (ui.draft.startsWith("/") && !ui.draft.includes(" "))))) {
           if (hit) {
             e.preventDefault()
             return pickMenu(hit)
@@ -343,7 +479,7 @@ export function Chat() {
       e.preventDefault()
       return cycleVariant()
     }
-    if (e.key === "ArrowUp" && e.currentTarget.selectionStart === 0) {
+    if (e.key === "ArrowUp" && e.currentTarget instanceof HTMLTextAreaElement && e.currentTarget.selectionStart === 0) {
       const users = msgs().filter((m) => m.info.role === "user").map((m) => m.parts.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("\n"))
       const last = users.at(-1)
       if (last && last !== ui.draft) {
@@ -356,7 +492,7 @@ export function Chat() {
   // ---------- 模式 / 变体 ----------
 
   const primaryAgents = (): { id: string; description?: string }[] => {
-    const list = store.agents().filter((a) => a.mode !== "subagent" && !a.hidden).map((a) => ({ id: a.id, description: a.description }))
+    const list = store.agents().filter((a) => a.mode !== "subagent").map((a) => ({ id: a.id, description: a.description }))
     return list.length ? list : [{ id: "code" }, { id: "plan" }, { id: "ask" }]
   }
   const modeName = () => store.agent() || "code"
@@ -398,15 +534,14 @@ export function Chat() {
     return { used: 0, limit: 200_000, pct: 0 }
   })
   function shieldRows(): [string, string][] {
-    const rules = (store.config().permission ?? []) as unknown as { permission: string; action: string }[]
-    const level = (n: string) => rules.filter((r) => r.permission === n).at(-1)?.action ?? "allow"
+    const p = store.config().permission
     return [
-      ["读文件 / Glob / Grep / List", level("read")],
-      ["编辑文件", level("edit")],
-      ["Bash 命令", level("bash")],
-      ["工作区外目录", level("external_directory")],
-      ["WebSearch / WebFetch", level("grep") === level("read") ? "allow" : "ask"],
-      ["子代理 Task / Skill", level("task")],
+      ["读文件 / Glob / Grep / List", permLevel(p, "read")],
+      ["编辑文件", permLevel(p, "edit")],
+      ["Bash 命令", permLevel(p, "bash")],
+      ["工作区外目录", permLevel(p, "external_directory")],
+      ["WebSearch / WebFetch", permLevel(p, "websearch")],
+      ["子代理 Task / Skill", permLevel(p, "task")],
     ]
   }
 
@@ -422,8 +557,9 @@ export function Chat() {
                 <span class="ctxbar"><i style={{ width: ctx().pct + "%" }} /></span>
                 <b>{ctx().pct}%</b>
               </span>
-              <button class="iconbtn" title="压缩上下文 /compact" onClick={() => void store.compact()}>⤓</button>
-              <button class="iconbtn" title="打开用量面板" onClick={() => store.setModule("usage")}>📈</button>
+              <button class="iconbtn" title="压缩上下文 /compact" onClick={() => void store.compact()}><Scissors size={13} strokeWidth={1.8} /></button>
+              <button class="iconbtn" title="转录内搜索" onClick={() => setFind({ open: !find.open, i: 0 })}><Search size={13} strokeWidth={1.8} /></button>
+              <button class="iconbtn" title="打开用量面板" onClick={() => store.setModule("usage")}><TrendingUp size={13} strokeWidth={1.8} /></button>
               <button class="iconbtn" title="展开活动/用量时间线" onClick={() => setUi("timeline", !ui.timeline)}>{ui.timeline ? "▴" : "▾"}</button>
             </div>
           </div>
@@ -453,6 +589,17 @@ export function Chat() {
         </div>
 
         <div class="messages" ref={stream} onScroll={() => setAtBottom(stream.scrollHeight - stream.scrollTop - stream.clientHeight < 120)}>
+          <Show when={find.open}>
+            <div class="findbar">
+              <input placeholder="在转录中搜索…" value={find.q} autofocus onInput={(e) => setFind("q", e.currentTarget.value)} onKeyDown={(e) => { if (e.key === "Enter") goFind(e.shiftKey ? -1 : 1); if (e.key === "Escape") setFind("open", false) }} />
+              <button classList={{ on: find.cs }} title="区分大小写" onClick={() => setFind("cs", !find.cs)}>Aa</button>
+              <button classList={{ on: find.ww }} title="全词匹配" onClick={() => setFind("ww", !find.ww)}>W</button>
+              <span class="cnt">{matches().length ? find.i + 1 : 0}/{matches().length}</span>
+              <button class="iconbtn" title="上一个" onClick={() => goFind(-1)}>↑</button>
+              <button class="iconbtn" title="下一个" onClick={() => goFind(1)}>↓</button>
+              <button class="iconbtn" title="关闭" onClick={() => setFind({ open: false, q: "" })}>✕</button>
+            </div>
+          </Show>
           <Show when={msgs().some((m) => m.info.role === "user")}>
             <div class="rail" title="PromptRail：用户消息刻度，点击跳转">
               <For each={msgs().map((m, i) => ({ m, i })).filter((x) => x.m.info.role === "user")}>
@@ -465,14 +612,24 @@ export function Chat() {
             <div classList={{ working: true, show: true }}>
               <span class="spinner" />
               <span>{working()}</span>
-              <span class="elapsed">{elapsed()}</span>
             </div>
           </Show>
           <Show when={store.error()}>
             <div class="outcome bad">
-              <span>⚠ 会话出错：{store.error()}</span>
+              <span><AlertTriangle size={13} strokeWidth={1.8} style="vertical-align:-2px" /> 会话出错：{store.error()}</span>
               <span class="grow1" />
               <button class="btn sm" onClick={() => store.newSession()}>清除</button>
+            </div>
+          </Show>
+          <Show when={session()?.revert}>
+            <div class="revertbar">
+              <span>↩ 已回退，后续消息暂不显示</span>
+              <Show when={(session()?.summary?.additions ?? 0) + (session()?.summary?.deletions ?? 0) > 0}>
+                <span class="stat"><span class="a">+{session()!.summary!.additions}</span><span class="d">−{session()!.summary!.deletions}</span></span>
+              </Show>
+              <span class="grow1" />
+              <button class="btn sm" onClick={() => store.setModule("diff")}>查看文件变更</button>
+              <button class="btn sm primary" onClick={() => void store.unrevert()}>Redo（撤销回退）</button>
             </div>
           </Show>
           <Show when={pending()} keyed>{(p) => <PermDock p={p} />}</Show>
@@ -506,17 +663,16 @@ export function Chat() {
       <div class="inputzone">
         <div class="hero">
           <img class="hero-logo" src={logo} alt="Kilo" />
-          <h2>{hello()}，{session()?.title ? "继续推进" : "做点什么"}{directory() ? "，继续推进 " + directory().split(/[\\/]/).at(-1) : ""}？</h2>
+          <h2>{directory() ? `${hello()}，继续推进 ${directory().split(/[\\/]/).at(-1)}？` : `${hello()}，做点什么？`}</h2>
           <p>描述目标即可 · 支持 / 命令、@ 文件提及、图片拖拽与粘贴</p>
         </div>
         <Show when={!welcome()}>
           <div class="dockrow">
-            <button class="newbtn" onClick={() => void store.newSession()}>＋ 新会话</button>
-            <button class="iconbtn" title="Fork 当前会话" onClick={() => void store.fork()}>⑂</button>
-            <button class="iconbtn" title="新建 Worktree 会话隔离" onClick={() => void makeWorktree()}>⌥</button>
             <button class="newbtn" title="查看本会话改动" onClick={() => store.setModule("diff")} style="margin-left:auto">
-              🧩 Show Changes
-              <Show when={session()?.summary}><span class="stat"><span class="a">+{session()!.summary!.additions}</span><span class="d">−{session()!.summary!.deletions}</span></span></Show>
+              <Puzzle size={13} strokeWidth={1.8} /> Show Changes
+              <Show when={(session()?.summary?.additions ?? 0) + (session()?.summary?.deletions ?? 0) > 0}>
+                <span class="stat"><span class="a">+{session()!.summary!.additions}</span><span class="d">−{session()!.summary!.deletions}</span></span>
+              </Show>
             </button>
             <span class="pill" title="/goal：设定长期目标让代理持续推进" onClick={() => { putDraft("/goal "); input.focus() }}>◎ Goal</span>
           </div>
@@ -545,7 +701,7 @@ export function Chat() {
                       onClick={() => pickMenu(x)}
                       onMouseEnter={() => setUi("hl", flat().findIndex((y) => y.c === x.c))}
                     >
-                      {x.i && <span class="ic">{x.i}</span>}
+                      {x.i && <span class="ic">{(() => { const Ic = x.i; return <Ic size={13} strokeWidth={1.8} /> })()}</span>}
                       <span class="cmd">{x.c}</span>
                       <span class="desc">{x.d}</span>
                       {x.g && <span class="g">{x.g}</span>}
@@ -553,28 +709,6 @@ export function Chat() {
                   )
                 }
               </For>
-            </div>
-          </Show>
-          <Show when={ui.menu === "model"}>
-            <div class="modelpop show"><ModelPop onPick={() => setUi("menu", "")} /></div>
-          </Show>
-          <Show when={ui.menu === "shield"}>
-            <div class="shieldpop show">
-              <For each={shieldRows()}>
-                {(r) => (
-                  <div class="sh-row">
-                    <span class="lbl">{r[0]}</span>
-                    <span classList={{ lvl: true, allow: r[1] === "allow", ask: r[1] === "ask", deny: r[1] === "deny" }}>{r[1] === "allow" ? "自动批准" : r[1] === "deny" ? "拒绝" : "询问"}</span>
-                  </div>
-                )}
-              </For>
-              <div class="sh-foot">
-                <span>临时自动批准：<b>{store.autoApprove() ? "开" : "关"}</b></span>
-                <span style="display:flex;gap:8px;align-items:center">
-                  <button classList={{ switch: true, on: store.autoApprove() }} onClick={() => store.setAutoApprove(!store.autoApprove())}><i /></button>
-                  <button class="btn sm" onClick={() => { store.setView("settings"); setSettingsTab("approve") }}>全部规则 →</button>
-                </span>
-              </div>
             </div>
           </Show>
 
@@ -619,31 +753,75 @@ export function Chat() {
               ＋
               <input type="file" multiple hidden onChange={(e) => { for (const f of Array.from(e.currentTarget.files ?? [])) void addFile(f); e.currentTarget.value = "" }} />
             </label>
-            <button class="selector" title="交互模式：点击选择 Agent（Mode）" onClick={() => setUi("menu", ui.menu === "mode" ? "" : "mode")}>
-              🧭 <span class="v" style="text-transform:capitalize">{modeName()}</span><span class="caret">▼</span>
-            </button>
-            <button class="selector" title="模型（/models）" onClick={() => setUi("menu", ui.menu === "model" ? "" : "model")}>
-              🅰 <span class="v">{modelName()}</span><span class="caret">▼</span>
-            </button>
+            <Popover placement="top-start" gutter={8} open={ui.menu === "mode"} onOpenChange={(o: boolean) => setUi("menu", o ? "mode" : "")}>
+              <Popover.Trigger class="selector" title="交互模式：点击选择 Agent（Mode）">
+                <span class="ti"><Compass size={13} strokeWidth={1.8} /></span> <span class="v" style="text-transform:capitalize">{modeName()}</span><span class="caret">▼</span>
+              </Popover.Trigger>
+              <Popover.Portal>
+                <Popover.Content class="modepop">
+                  <For each={primaryAgents()}>
+                    {(a) => (
+                      <button class="pm-item" classList={{ hl: store.agent() === a.id }} onClick={() => { store.setAgent(a.id); setUi("menu", "") }}>
+                        <span class="cmd" style="text-transform:capitalize">{a.id}</span>
+                        <span class="desc">{a.description ?? ""}</span>
+                      </button>
+                    )}
+                  </For>
+                </Popover.Content>
+              </Popover.Portal>
+            </Popover>
+            <Popover placement="top-start" gutter={8} open={ui.menu === "model"} onOpenChange={(o: boolean) => setUi("menu", o ? "model" : "")}>
+              <Popover.Trigger class="selector" title="模型（/models）">
+                <span class="ti"><Box size={13} strokeWidth={1.8} /></span> <span class="v">{modelName()}</span><span class="caret">▼</span>
+              </Popover.Trigger>
+              <Popover.Portal>
+                <Popover.Content class="modelpop"><ModelPop onPick={() => setUi("menu", "")} /></Popover.Content>
+              </Popover.Portal>
+            </Popover>
             <Show when={variants().length}>
-              <button class="selector" title="推理强度变体（Shift+Tab）" onClick={cycleVariant}>
-                ◐ <span class="v">{curModel()?.variant || "默认"}</span><span class="caret">▼</span>
-              </button>
-            </Show>
-            <Show when={ui.menu === "mode"}>
-              <div style="position:absolute;bottom:100%;left:10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.14);padding:5px;z-index:60;margin-bottom:6px">
-                <For each={primaryAgents()}>
-                  {(a) => (
-                    <button class="pm-item" classList={{ hl: store.agent() === a.id }} onClick={() => { store.setAgent(a.id); setUi("menu", "") }}>
-                      <span class="cmd" style="text-transform:capitalize">{a.id}</span>
-                      <span class="desc">{a.description ?? ""}</span>
+              <Popover placement="top-start" gutter={8} open={ui.menu === "variant"} onOpenChange={(o: boolean) => setUi("menu", o ? "variant" : "")}>
+                <Popover.Trigger class="selector" title="推理强度变体（Shift+Tab 循环）">
+                  <span class="ti"><RotateCcw size={13} strokeWidth={1.8} /></span> <span class="v">{curModel()?.variant || "默认"}</span><span class="caret">▼</span>
+                </Popover.Trigger>
+                <Popover.Portal>
+                  <Popover.Content class="variantpop">
+                    <button class="pm-item" classList={{ hl: !curModel()?.variant }} onClick={() => { const m = curModel(); if (m) store.setModel({ ...m, variant: undefined }); setUi("menu", "") }}>
+                      <span class="cmd">默认</span>
                     </button>
-                  )}
-                </For>
-              </div>
+                    <For each={variants()}>
+                      {(v) => (
+                        <button class="pm-item" classList={{ hl: curModel()?.variant === v }} onClick={() => { const m = curModel(); if (m) store.setModel({ ...m, variant: v }); setUi("menu", "") }}>
+                          <span class="cmd">{v}</span>
+                        </button>
+                      )}
+                    </For>
+                  </Popover.Content>
+                </Popover.Portal>
+              </Popover>
             </Show>
             <span class="spacer" />
-            <button class="iconbtn" title="自动批准概览" onClick={() => setUi("menu", ui.menu === "shield" ? "" : "shield")}>🛡️</button>
+            <Popover placement="top-end" gutter={8} open={ui.menu === "shield"} onOpenChange={(o: boolean) => setUi("menu", o ? "shield" : "")}>
+              <Popover.Trigger class="iconbtn" title="自动批准概览"><Shield size={14} strokeWidth={1.8} /></Popover.Trigger>
+              <Popover.Portal>
+                <Popover.Content class="shieldpop">
+                  <For each={shieldRows()}>
+                    {(r) => (
+                      <div class="sh-row">
+                        <span class="lbl">{r[0]}</span>
+                        <span classList={{ lvl: true, allow: r[1] === "allow", ask: r[1] === "ask", deny: r[1] === "deny" }}>{r[1] === "allow" ? "自动批准" : r[1] === "deny" ? "拒绝" : "询问"}</span>
+                      </div>
+                    )}
+                  </For>
+                  <div class="sh-foot">
+                    <span>临时自动批准：<b>{store.autoApprove() ? "开" : "关"}</b></span>
+                    <span style="display:flex;gap:8px;align-items:center">
+                      <button classList={{ switch: true, on: store.autoApprove() }} onClick={() => store.setAutoApprove(!store.autoApprove())}><i /></button>
+                      <button class="btn sm" onClick={() => { store.setView("settings"); setSettingsTab("approve") }}>全部规则 →</button>
+                    </span>
+                  </div>
+                </Popover.Content>
+              </Popover.Portal>
+            </Popover>
             <button
               class="iconbtn"
               title="提示词增强 · 再点一次可回滚"
@@ -660,10 +838,10 @@ export function Chat() {
                 if (!better || better === t) return store.notify("增强失败或无变化")
                 setUi({ enhanced: ui.draft, draft: better })
                 store.setDraft(better)
-                store.notify("提示词已增强 · 再点 🪄 可还原")
+                store.notify("提示词已增强 · 再点魔杖可还原")
               }}
             >
-              🪄
+              <Wand2 size={14} strokeWidth={1.8} />
             </button>
             <Show when={!isBusy()} fallback={<button class="sendbtn stop" title="停止 (Esc)" onClick={() => void store.abort()}><span class="sq" /></button>}>
               <button class="sendbtn" title="发送 (Enter)" onClick={submit} disabled={!ui.draft.trim() && !staged().length}>↑</button>
@@ -726,7 +904,7 @@ function Message(props: { msg: Msg }) {
       <Show when={info().role === "user"} fallback={<Assistant msg={props.msg} />}>
         <div class="msg user">
           <div class="meta">
-            <span class="badge gray">{((info() as { agent?: string }).agent ?? "Code")}</span>
+            <span class="badge gray">{(info() as { agent?: string }).agent ?? "Code"}</span>
             <span>{new Date(info().time.created).toTimeString().slice(0, 5)}</span>
           </div>
           <div class="bubble">{textOf(props.msg.parts).join("\n") || (props.msg.parts.some((p) => p.type === "file") ? "" : "（附件）")}</div>
@@ -737,7 +915,7 @@ function Message(props: { msg: Msg }) {
                   f.mime.startsWith("image/") && f.url.startsWith("data:") ? (
                     <div class="thumb"><img src={f.url} alt={f.filename ?? ""} /></div>
                   ) : (
-                    <span class="chip file" title={f.url}>{f.filename ?? "file"}</span>
+                    <span class="chip file" title={f.url} onClick={() => openRef(f.url)}>{f.filename ?? "file"}</span>
                   )
                 }
               </For>
@@ -760,15 +938,6 @@ function Assistant(props: { msg: Msg }) {
     const i = props.msg.info
     return i.role === "assistant" ? i : undefined
   }
-  const err = () => {
-    const i = info()
-    const e = i?.error
-    if (!e) return ""
-    if (e.name === "MessageAbortedError") return ""
-    const data: unknown = e.data
-    if (typeof data === "object" && data !== null && "message" in data && typeof data.message === "string") return data.message
-    return e.name
-  }
   return (
     <div class="msg ai">
       <div class="role">
@@ -776,20 +945,55 @@ function Assistant(props: { msg: Msg }) {
         Kilo · <span class="badge gray">{info()?.agent || "Code"}</span> · {info()?.modelID}{info()?.variant ? ` · ${info()!.variant}` : ""}
       </div>
       <For each={props.msg.parts}>{(p) => <PartView part={p} />}</For>
-      <Show when={info()?.error}>
-        <div class="outcome bad">
-          {info()?.error?.name === "MessageAbortedError" ? "⏹ 已中断（Esc）· 保留已生成内容" : `⛔ ${err()}`}
+      <Show when={info()?.error}>{(err) => <ErrorCard e={err()} provider={info()!.providerID} />}</Show>
+      <Show when={info()?.time.completed}>
+        <div class="turnact">
+          <button title="复制回复" onClick={() => void navigator.clipboard.writeText(textOf(props.msg.parts).join("\n"))}><Copy size={13} strokeWidth={1.8} /></button>
+          <button title="有帮助" classList={{ on: votes()[info()!.id] === "up" }} onClick={() => vote(info()!.id, "up")}><ThumbsUp size={13} strokeWidth={1.8} /></button>
+          <button title="需改进" classList={{ on: votes()[info()!.id] === "down" }} onClick={() => vote(info()!.id, "down")}><ThumbsDown size={13} strokeWidth={1.8} /></button>
+          <button title="从此回合 Fork 新会话" onClick={() => void store.fork(info()!.sessionID)}><GitFork size={13} strokeWidth={1.8} /></button>
+          <span class="when">{new Date(info()!.time.completed!).toTimeString().slice(0, 5)}</span>
         </div>
       </Show>
-      <Show when={info()?.time.completed}>
-        <div class="outcome">
-          <span>✓ 回合完成</span>
-          <span>{props.msg.parts.filter((p) => p.type === "tool").length} tools</span>
-          <span><b>${(info()?.cost ?? 0).toFixed(4)}</b></span>
-          <span>in {fmtK(info()?.tokens.input ?? 0)}{info()?.tokens.cache.read ? ` · cache ${fmtK(info()!.tokens.cache.read ?? 0)}` : ""} / out {fmtK(info()?.tokens.output ?? 0)}{info()?.tokens.reasoning ? ` · reasoning ${fmtK(info()!.tokens.reasoning ?? 0)}` : ""}</span>
-          <span class="grow1" />
-          <button class="btn sm" onClick={() => store.setModule("diff")}>查看 Diff</button>
-        </div>
+    </div>
+  )
+}
+
+function ErrorCard(props: { e: NonNullable<AssistantMessage["error"]>; provider: string }) {
+  const e = () => props.e
+  const msg = (): string => {
+    const d: unknown = e().data
+    if (!d || typeof d !== "object") return ""
+    const box: Record<string, unknown> = { ...d }
+    return typeof box.message === "string" ? box.message : ""
+  }
+  const status = () => {
+    const d: unknown = e().data
+    if (!d || typeof d !== "object") return undefined
+    const box: Record<string, unknown> = { ...d }
+    return typeof box.statusCode === "number" ? box.statusCode : undefined
+  }
+  const authed = () => e().name === "ProviderAuthError"
+  const limited = () => e().name === "APIError" && status() === 429
+  const length = () => e().name === "MessageOutputLengthError"
+  const aborted = () => e().name === "MessageAbortedError"
+  return (
+    <div class="outcome bad">
+      <span class="ec-ic">
+        {aborted() ? "■" : authed() ? "🔑" : limited() ? "🕙" : length() ? "✂" : <AlertTriangle size={13} strokeWidth={1.8} style="vertical-align:-2px" />}
+      </span>
+      <span class="ec-txt">
+        {aborted() ? "已中断（Esc）· 保留已生成内容" : authed() ? `未授权：${props.provider}` : limited() ? "触发速率限制" : length() ? "输出达到模型长度上限" : msg() || e().name}
+      </span>
+      <span class="grow1" />
+      <Show when={authed()} fallback={
+        <>
+          <Show when={limited()}><span class="ec-hint">稍后将自动重试</span></Show>
+          <Show when={length()}><button class="btn sm" onClick={() => void store.send("继续")}>继续</button></Show>
+        </>
+      }>
+        <button class="btn sm" onClick={() => { store.setView("settings"); setSettingsTab("providers"); openModal("provider", { provider: props.provider }) }}>✨ 升级</button>
+        <button class="btn sm primary" onClick={() => openModal("provider", { provider: props.provider })}>Sign in</button>
       </Show>
     </div>
   )
@@ -801,23 +1005,25 @@ function PartView(props: { part: Part }) {
       {props.part.type === "text" && !props.part.synthetic && <div class="md" innerHTML={md(props.part.text)} />}
       {props.part.type === "reasoning" && props.part.text.trim() && (
         <details class="think">
-          <summary>🧠 思考过程</summary>
+          <summary><Brain size={13} strokeWidth={1.8} /> 思考过程 <span class="chev"><ChevronRight size={12} strokeWidth={2} /></span></summary>
           <div class="body" innerHTML={md(props.part.text)} />
         </details>
       )}
-      {props.part.type === "file" && <span class="chip file" style="margin:0 6px 6px">{props.part.filename ?? "file"}</span>}
-      {props.part.type === "compaction" && <div class="outcome">✂️ 上下文已压缩{props.part.auto ? "（自动）" : ""}，后续消息基于摘要继续</div>}
+      {props.part.type === "file" && <span class="chip file" style="margin:0 6px 6px;cursor:pointer" title="打开" onClick={openRef.bind(null, props.part.url)}>{props.part.filename ?? "file"}</span>}
+      {props.part.type === "compaction" && <div class="outcome"><Scissors size={13} strokeWidth={1.8} style="vertical-align:-2px" /> 上下文已压缩{props.part.auto ? "（自动）" : ""}，后续消息基于摘要继续</div>}
       {props.part.type === "retry" && (
         <div class="working show" style="max-width:760px">
           <span class="spinner" />
           <span>API 重试中 · 第 {props.part.attempt} 次…</span>
-          <code class="tinp">{props.part.error.name}</code>
+          <code class="tinp">{props.part.error.data.message.slice(0, 120)}</code>
+          <Show when={retryWait(props.part)}>{(w) => <span class="ec-hint">约 {w()}s 后重试</span>}</Show>
+          <button class="btn sm danger" style="margin-left:auto" onClick={() => void store.abort()}>取消重试</button>
         </div>
       )}
       {props.part.type === "patch" && (
         <div class="tool">
           <div class="thead">
-            <span>✂️</span><span class="tname">Patch</span><span class="tsub">{props.part.files.length} 个文件</span>
+            <span class="ti"><Scissors size={13} strokeWidth={1.8} /></span><span class="tname">Patch</span><span class="tsub">{props.part.files.length} 个文件</span>
           </div>
         </div>
       )}
@@ -826,18 +1032,18 @@ function PartView(props: { part: Part }) {
   )
 }
 
-const TOOL_META: Record<string, [string, string]> = {
-  read: ["📄", "Read"], list: ["🗂", "List"], glob: ["⌕", "Glob"], grep: ["⌕", "Grep"],
-  bash: ["⌨", "Running Command"], edit: ["✎", "Edit"], write: ["▤", "Write"], multiedit: ["✎", "MultiEdit"],
-  apply_patch: ["✂️", "Apply Patch"], task: ["⧉", "Task"], todowrite: ["✓", "To-dos"], todoread: ["✓", "To-dos"],
-  websearch: ["🔎", "Web Search"], webfetch: ["🌐", "Web Fetch"], skill: ["📘", "Skill"], question: ["❓", "Question"],
-  lsp: ["⇄", "LSP"], patch: ["✂️", "Patch"], invalid: ["⚠", "Invalid"],
+const TOOL_META: Record<string, [LucideIcon, string]> = {
+  read: [FileText, "Read"], list: [List, "List"], glob: [Search, "Glob"], grep: [Search, "Grep"],
+  bash: [SquareTerminal, "Running Command"], edit: [Pencil, "Edit"], write: [Pencil, "Write"], multiedit: [Pencil, "MultiEdit"],
+  apply_patch: [Scissors, "Apply Patch"], task: [GitBranch, "Task"], todowrite: [ListChecks, "To-dos"], todoread: [ListChecks, "To-dos"],
+  websearch: [Search, "Web Search"], webfetch: [Globe, "Web Fetch"], skill: [BookOpen, "Skill"], question: [CircleHelp, "Question"],
+  lsp: [Settings, "LSP"], patch: [Scissors, "Patch"], invalid: [AlertTriangle, "Invalid"],
 }
 
 function ToolCard(props: { part: Extract<Part, { type: "tool" }> }) {
   const [open, setOpen] = createSignal(false)
   const st = () => props.part.state
-  const meta = () => TOOL_META[props.part.tool] ?? ["⚙", props.part.tool.slice(0, 18)]
+  const meta = (): [LucideIcon, string] => TOOL_META[props.part.tool] ?? [Settings, props.part.tool.slice(0, 18)]
   const inp = () => st().input
   const str = (v: unknown) => (typeof v === "string" ? v : "")
   const md = () => {
@@ -881,15 +1087,15 @@ function ToolCard(props: { part: Extract<Part, { type: "tool" }> }) {
   }
   const body = () => {
     const s = st()
-    if (s.status === "running") return s.title ?? "执行中…"
-    const out = s.status === "completed" ? s.output ?? "" : s.status === "error" ? s.error ?? "执行失败" : ""
-    return out
+    if (s.status === "completed") return s.output ?? ""
+    if (s.status === "error") return s.error ?? "执行失败"
+    return ""
   }
   const isBash = () => props.part.tool === "bash"
   return (
     <div class="tool">
       <button class="thead" onClick={() => setOpen(!open())} title={`${props.part.tool} ${sub()}`}>
-        <span>{meta()[0]}</span>
+        <span class="ti">{(() => { const Ic = meta()[0]; return <Ic size={14} strokeWidth={1.8} /> })()}</span>
         <span class="tname">{meta()[1]}</span>
         <span class="tsub">{sub()}</span>
         <span class="tstat">
@@ -897,6 +1103,7 @@ function ToolCard(props: { part: Extract<Part, { type: "tool" }> }) {
           <span classList={{ badge: true, ok: st().status === "completed", err: st().status === "error", run: st().status === "running" }}>
             {st().status === "completed" ? "完成" : st().status === "error" ? "失败" : st().status === "running" ? "进行中" : "等待"}
           </span>
+          <span class="chev" classList={{ open: open() }}><ChevronRight size={12} strokeWidth={2} /></span>
         </span>
       </button>
       <Show when={open()}>
@@ -913,7 +1120,57 @@ function ToolCard(props: { part: Extract<Part, { type: "tool" }> }) {
               <For each={diffText().split("\n")}>{(l) => <span class={l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : l.startsWith("@@") ? "hh" : "ctx"}>{l || " "}</span>}</For>
             </div>
           </Show>
+          <Show when={props.part.tool === "task" && props.part.sessionID}>
+            <SubtaskView parent={props.part.sessionID} />
+          </Show>
         </div>
+      </Show>
+    </div>
+  )
+}
+
+function SubtaskView(props: { parent: string }) {
+  const [kids, setKids] = createSignal<{ id: string; title?: string }[]>([])
+  const [open, setOpen] = createSignal("")
+  const [msgs, setMsgs] = createSignal<Record<string, Msg[]>>({})
+  async function load() {
+    const list = (await store.children(props.parent)) ?? []
+    setKids(list.map((s) => ({ id: s.id, title: s.title })))
+  }
+  void load()
+  async function toggle(id: string) {
+    if (open() === id) {
+      setOpen("")
+      return
+    }
+    setOpen(id)
+    if (msgs()[id]) return
+    const c = client()
+    const res = await c?.session.messages({ sessionID: id, directory: directory() }).catch(() => undefined)
+    setMsgs((m) => ({ ...m, [id]: (res?.data ?? []) as Msg[] }))
+  }
+  return (
+    <div class="subtasks">
+      <div class="sth">⧉ 子代理会话 · {kids().length}</div>
+      <Show when={kids().length} fallback={<div class="ss-hint">{kids().length === 0 ? "加载子会话…" : ""}</div>}>
+        <For each={kids()}>{(k) => (
+          <>
+            <button class="ss-row" onClick={() => void toggle(k.id)}>
+              <span class="tw">{open() === k.id ? "▾" : "▸"}</span>
+              <span>{k.title || k.id}</span>
+            </button>
+            <Show when={open() === k.id}>
+              <div class="ss-body">
+                <For each={msgs()[k.id] ?? []}>{(m) => (
+                  <div class="ss-msg">
+                    <b>{m.info.role === "user" ? "→" : ""}</b>
+                    <span>{m.parts.flatMap((p) => (p.type === "text" ? [p.text] : p.type === "tool" ? [`[${p.tool}]`] : [])).join(" ").slice(0, 600) || "…"}</span>
+                  </div>
+                )}</For>
+              </div>
+            </Show>
+          </>
+        )}</For>
       </Show>
     </div>
   )
@@ -926,7 +1183,6 @@ function PermDock(props: { p: { id: string; permission: string; patterns?: strin
   const cmd = () => {
     const md = p().metadata
     if (md && typeof md.command === "string") return md.command
-    if (typeof md?.description === "string") return ""
     return ""
   }
   const [rulesOn, setRulesOn] = createSignal<Record<string, boolean>>({})
@@ -936,7 +1192,7 @@ function PermDock(props: { p: { id: string; permission: string; patterns?: strin
   return (
     <div class="permdock">
       <div class="ph">
-        <span class="ic">⚠</span>请求执行 {cmd() ? "命令" : "操作"}
+        <span class="ic"><AlertTriangle size={14} strokeWidth={1.8} /></span>请求执行 {cmd() ? "命令" : "操作"}
         <span class="src">{p().permission}</span>
       </div>
       <div class="hint">该操作将修改外部状态。允许一次，或为同类操作开启自动批准。</div>
@@ -1004,7 +1260,7 @@ function QDock(props: { q: Question }) {
                 )
               }}
             </For>
-            <input class="free" placeholder="✎ 输入自定义答案…" value={free()[idx()] ?? ""} onInput={(e) => setFree((f) => ({ ...f, [idx()]: e.currentTarget.value }))} />
+            <input class="free" placeholder="输入自定义答案…" value={free()[idx()] ?? ""} onInput={(e) => setFree((f) => ({ ...f, [idx()]: e.currentTarget.value }))} />
           </>
         )}
       </Show>
@@ -1022,7 +1278,7 @@ function QDock(props: { q: Question }) {
 function ModelPop(props: { onPick: () => void }) {
   const [q, setQ] = createSignal("")
   const [hover, setHover] = createSignal("")
-  type Row = { id: string; name: string; prov: string; free: boolean; in: number; out: number; cache: number; ctx: number; desc: string; caps: string[]; star: boolean; group: string; variants: string[] }
+  type Row = { id: string; name: string; prov: string; free: boolean; in: number; out: number; cache: number; ctx: number; desc: string; caps: string[]; star: boolean; group: string; variants: string[]; tb?: { overallScore: number; avgAttemptCostUsd: number } }
   const rows = createMemo<Row[]>(() => {
     const out: Row[] = []
     for (const p of store.providers().all) {
@@ -1042,6 +1298,7 @@ function ModelPop(props: { onPick: () => void }) {
           star: store.favorites().includes(`${p.id}/${m.id}`),
           group: p.name ?? p.id,
           variants: Object.keys(m.variants ?? {}),
+          tb: m.terminalBench,
         })
       }
     }
@@ -1052,7 +1309,7 @@ function ModelPop(props: { onPick: () => void }) {
     const fav = list.filter((r) => r.star)
     const rest = new Map<string, Row[]>()
     for (const r of list.filter((x) => !x.star)) rest.set(r.group, [...(rest.get(r.group) ?? []), r])
-    return [{ g: "⭐ 收藏", items: fav }, ...[...rest].map(([g, items]) => ({ g, items }))].filter((x) => x.items.length)
+    return [{ g: "★ 收藏", items: fav }, ...[...rest].map(([g, items]) => ({ g, items }))].filter((x) => x.items.length)
   }
   const selId = () => { const m = store.model(); return m ? `${m.providerID}/${m.modelID}` : "" }
   const preview = () => rows().find((r) => r.id === (hover() || selId()))
@@ -1104,6 +1361,7 @@ function ModelPop(props: { onPick: () => void }) {
               <div class="pr"><span>缓存读</span><b>{m.free ? "—" : money(m.cache || 0.3) + "/M"}</b></div>
               <div class="pr"><span>缓存写</span><b>{m.free ? "—" : "$0.375/M"}</b></div>
               <div class="kv">上下文窗口 <b>{m.ctx ? fmtK(m.ctx) : "—"}</b></div>
+              <Show when={m.tb}><div class="kv">Terminal-Bench <b>{Math.round((m.tb?.overallScore ?? 0) * 100)}%</b> · 均次 <b>${(m.tb?.avgAttemptCostUsd ?? 0).toFixed(2)}</b></div></Show>
               <div class="cap"><For each={m.caps}>{(c) => <span class="badge gray">{c}</span>}</For></div>
               {m.variants.length > 0 && <div class="kv">推理变体 <b>{m.variants.slice(0, 4).join(" / ")}</b></div>}
               <div class="desc">{m.desc}</div>

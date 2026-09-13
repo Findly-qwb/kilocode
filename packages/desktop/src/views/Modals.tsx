@@ -1,34 +1,42 @@
-import { Show, createSignal, For } from "solid-js"
-import { client, directory } from "../client"
+import { Show, createResource, createSignal, For } from "solid-js"
+import { Dialog } from "@kobalte/core/dialog"
+import type { ProviderConfig } from "@kilocode/sdk/v2/types"
+import { Key, ShieldCheck, Puzzle, Bot, BookOpen, MessageSquare, LifeBuoy, TriangleAlert } from "lucide-solid"
+import { client, directory, ready } from "../client"
 import { saveConfig, store } from "../store"
 import { modal, openModal, closeModal, type ModalArg } from "../ui"
 import { openUrl, writeAgent } from "../host"
 
 export function Modals() {
   return (
-    <Show when={modal()} keyed>
-      {(m) => (
-        <div class="overlay show" onClick={(e) => e.target === e.currentTarget && closeModal()}>
-          <div classList={{ sheet: true, wide: m.name === "custom" || m.name === "market" }}>
-            {m.name === "provider" && <ProviderModal arg={m.arg} />}
-            {m.name === "custom" && <CustomModal arg={m.arg} />}
-            {m.name === "mcp" && <McpModal arg={m.arg} />}
-            {m.name === "market" && <MarketModal />}
-            {m.name === "install" && <InstallModal arg={m.arg} />}
-            {m.name === "cloudimport" && <CloudImportModal />}
-            {m.name === "feedback" && <FeedbackModal />}
-            {m.name === "agent" && <AgentModal arg={m.arg} />}
-          </div>
-        </div>
-      )}
-    </Show>
+    <Dialog open={!!modal()} onOpenChange={(o: boolean) => !o && closeModal()}>
+      <Dialog.Portal>
+        <Dialog.Overlay class="overlay show" />
+        <Dialog.Content classList={{ sheet: true, wide: modal()?.name === "custom" || modal()?.name === "market" }}>
+          <Show when={modal()} keyed>
+            {(m) => (
+              <>
+                {m.name === "provider" && <ProviderModal arg={m.arg} />}
+                {m.name === "custom" && <CustomModal arg={m.arg} />}
+                {m.name === "mcp" && <McpModal arg={m.arg} />}
+                {m.name === "market" && <MarketModal />}
+                {m.name === "install" && <InstallModal arg={m.arg} />}
+                {m.name === "cloudimport" && <CloudImportModal />}
+                {m.name === "feedback" && <FeedbackModal />}
+                {m.name === "agent" && <AgentModal arg={m.arg} />}
+              </>
+            )}
+          </Show>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog>
   )
 }
 
 function Head(props: { title: string }) {
   return (
     <div class="mhead">
-      <h3>{props.title}</h3>
+      <Dialog.Title as="h3">{props.title}</Dialog.Title>
       <button class="x" onClick={closeModal}>✕</button>
     </div>
   )
@@ -43,8 +51,10 @@ function ProviderModal(props: { arg?: ModalArg }) {
   const [key, setKey] = createSignal("")
   const [baseUrl, setBaseUrl] = createSignal("")
   const [status, setStatus] = createSignal("")
-  const methods = () => p()?.env ?? []
-  const hasOauth = true
+  const [methods] = createResource(() => ready(), async (r) => (r ? ((await client()?.provider.auth())?.data ?? {}) : {}))
+  const envs = () => p()?.env ?? []
+  const oauthIdx = () => ((methods() ?? {})[pid()] ?? []).findIndex((x) => x.type === "oauth")
+  const hasOauth = () => oauthIdx() >= 0
   async function saveKey() {
     const c = client()
     if (!c) return
@@ -66,24 +76,21 @@ function ProviderModal(props: { arg?: ModalArg }) {
   async function oauth() {
     const c = client()
     if (!c) return
-    setStatus("正在打开授权页面…")
+    setStatus("正在发起授权…")
     const res = await c.provider.oauth
-      .authorize({ providerID: pid(), method: 0 })
+      .authorize({ providerID: pid(), method: oauthIdx(), directory: directory() })
       .then((r) => r.data)
       .catch((e: Error) => {
         setStatus("失败：" + e.message)
       })
     if (!res) return
-    await openUrl(res.url)
+    if (pid() !== "kilo") await openUrl(res.url)
     setStatus(res.instructions || "请在浏览器完成授权…")
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 2000))
-      const d = await c.provider.list({ directory: directory() }).then((r) => r.data).catch(() => undefined)
-      if (d?.connected.includes(pid())) break
-    }
+    const done = await c.provider.oauth.callback({ providerID: pid(), method: oauthIdx(), directory: directory() }).then(() => true).catch(() => false)
     setStatus("")
     closeModal()
     await store.refresh()
+    store.notify(done ? `${p()?.name ?? pid()} 已连接` : "授权未完成")
   }
   return (
     <>
@@ -91,16 +98,16 @@ function ProviderModal(props: { arg?: ModalArg }) {
       <div class="mbody">
         <Show when={view() === "list"}>
           <button class="auth-method" onClick={() => setView("apikey")}>
-            <span class="ic">🔑</span>
+            <span class="ic"><Key size={15} strokeWidth={1.8} /></span>
             <div><b>API Key</b><br /><span>粘贴 {p()?.name ?? pid()} 密钥，保存在本地配置</span></div>
           </button>
-          <Show when={hasOauth}>
+          <Show when={hasOauth()}>
             <button class="auth-method" onClick={() => setView("oauth")}>
-              <span class="ic">🛰️</span>
+              <span class="ic"><ShieldCheck size={15} strokeWidth={1.8} /></span>
               <div><b>OAuth</b><br /><span>打开浏览器完成授权（订阅账号）</span></div>
             </button>
           </Show>
-          <Show when={methods().length}><div class="hint" style="font-size:11px;color:var(--muted);margin-top:6px">支持环境变量：{methods().join(", ")} · 填 {"{env:VAR}"} 语法读取</div></Show>
+          <Show when={envs().length}><div class="hint" style="font-size:11px;color:var(--muted);margin-top:6px">支持环境变量：{envs().join(", ")} · 填 {"{env:VAR}"} 语法读取</div></Show>
         </Show>
         <Show when={view() === "apikey"}>
           <div class="field">
@@ -134,38 +141,39 @@ function ProviderModal(props: { arg?: ModalArg }) {
 
 type Card = { id: string; name: string; reasoning: boolean; image: boolean }
 
-function toCards(v: unknown): Card[] {
-  const rec = (v as Record<string, { name?: string }> | undefined) ?? {}
-  const list = Object.entries(rec).map(([k, m]) => ({ id: k, name: m?.name ?? k, reasoning: false, image: false }))
+function toCards(models: ProviderConfig["models"]): Card[] {
+  const list = Object.entries(models ?? {}).map(([k, m]) => ({ id: k, name: m?.name ?? k, reasoning: false, image: false }))
   return list.length ? list : [{ id: "", name: "", reasoning: false, image: false }]
 }
 
 function CustomModal(props: { arg?: ModalArg }) {
-  const existing = props.arg?.provider ? (((store.config().provider as unknown as Record<string, Record<string, unknown>> | undefined)?.[props.arg.provider]) ?? {}) : {}
-  const str = (v: unknown, def = "") => (typeof v === "string" ? v : def)
-  const opts = (existing.options as Record<string, unknown> | undefined) ?? {}
-  const [id, setId] = createSignal(str(existing.id) || props.arg?.provider || "")
-  const [name, setName] = createSignal(str(existing.name))
-  const [sdk, setSdk] = createSignal(str(existing.npm) || "@ai-sdk/openai-compatible")
-  const [base, setBase] = createSignal(str(opts.baseURL))
-  const [key, setKey] = createSignal(str(opts.apiKey))
-  const [cards, setCards] = createSignal<Card[]>(toCards(existing.models))
+  const existing = props.arg?.provider ? store.config().provider?.[props.arg.provider] : undefined
+  const [id, setId] = createSignal(props.arg?.provider ?? "")
+  const [name, setName] = createSignal(existing?.name ?? "")
+  const [sdk, setSdk] = createSignal(existing?.npm ?? "@ai-sdk/openai-compatible")
+  const [base, setBase] = createSignal(existing?.options?.baseURL ?? "")
+  const [key, setKey] = createSignal(existing?.options?.apiKey ?? "")
+  const [cards, setCards] = createSignal(toCards(existing?.models))
   async function save() {
     if (!id().trim() || !/^[a-z0-9._-]+$/.test(id().trim())) return store.notify("Provider ID 需为小写字母/数字/连字符")
-    const cfg: Record<string, unknown> = { npm: sdk() }
+    const cfg: ProviderConfig = { npm: sdk() }
     if (name().trim()) cfg.name = name().trim()
-    const options: Record<string, string> = {}
+    const options: NonNullable<ProviderConfig["options"]> = {}
     if (base().trim()) options.baseURL = base().trim()
     if (key().trim()) options.apiKey = key().trim()
     if (Object.keys(options).length) cfg.options = options
-    const models = Object.fromEntries(cards().filter((c) => c.id.trim()).map((c) => [c.id.trim(), { name: c.name || c.id, ...(c.reasoning ? { options: { reasoning: true } } : {}) }]))
+    const models: NonNullable<ProviderConfig["models"]> = {}
+    for (const c of cards().filter((x) => x.id.trim())) models[c.id.trim()] = { name: c.name || c.id, ...(c.reasoning ? { options: { reasoning: true } } : {}) }
     if (Object.keys(models).length) cfg.models = models
     const ok = await saveConfig({ provider: { [id().trim()]: cfg } })
-    if (ok) {
-      closeModal()
-      await store.refresh()
-      store.notify("自定义供应商已保存 · 请在选择器中确认模型")
-    }
+    if (!ok) return
+    const c = client()
+    closeModal()
+    await c?.instance.reload({ directory: directory() }).catch(() => undefined)
+    await store.refresh()
+    const found = store.providers().all.find((p) => p.id === id().trim())
+    const n = found ? Object.keys(found.models).length : 0
+    store.notify(n ? `已保存并发现 ${n} 个模型 · 可在选择器使用` : "已保存 · 未发现模型（检查 Base URL/Key，或手动填写模型 ID）")
   }
   return (
     <>
@@ -256,7 +264,10 @@ function McpModal(props: { arg?: ModalArg }) {
         <div class="field"><label>名称</label><input value={name()} disabled={isEdit} placeholder="context7" onInput={(e) => setName(e.currentTarget.value)} /></div>
         <div class="field">
           <label>传输类型</label>
-          <select value={transport()} onChange={(e) => setTransport(e.currentTarget.value as unknown as "http" | "sse" | "stdio")}>
+          <select value={transport()} onChange={(e) => {
+            const v = e.currentTarget.value
+            setTransport(v === "stdio" ? "stdio" : v === "sse" ? "sse" : "http")
+          }}>
             <option value="http">http（远程 URL）</option><option value="sse">sse（远程 URL）</option><option value="stdio">stdio（本地命令）</option>
           </select>
           <div class="hint">也可直接编辑 <code class="inline">.kilo/config.json</code> 的 mcp 段，或从市场安装</div>
@@ -294,7 +305,8 @@ const MARKET = {
 }
 const [skillInstalled] = createSignal(savedSkills())
 function savedSkills() {
-  return JSON.parse(localStorage.getItem("market.skills") ?? "[]") as unknown as string[]
+  const v: string[] = JSON.parse(localStorage.getItem("market.skills") ?? "[]")
+  return v
 }
 
 function MarketModal() {
@@ -315,7 +327,7 @@ function MarketModal() {
           <For each={MARKET.mcp.filter((x) => !q() || x.name.toLowerCase().includes(q().toLowerCase()))}>
             {(x) => (
               <div class="market-card">
-                <span class="picon">🧩</span>
+                <span class="picon"><Puzzle size={14} strokeWidth={1.8} /></span>
                 <div class="inf"><b>{x.name}</b> <span class="badge gray">mcp</span><div class="d">{x.desc}</div></div>
                 <button class="btn sm primary" onClick={() => openModal("install", { item: x.id })}>安装</button>
               </div>
@@ -326,7 +338,7 @@ function MarketModal() {
           <For each={MARKET.agent}>
             {(x) => (
               <div class="market-card">
-                <span class="picon">🕵</span>
+                <span class="picon"><Bot size={14} strokeWidth={1.8} /></span>
                 <div class="inf"><b>{x.name}</b> <span class="badge gray">agent</span><div class="d">{x.desc}</div></div>
                 <button class="btn sm" onClick={() => void installAgent(x.id, x.desc)}>安装</button>
               </div>
@@ -337,7 +349,7 @@ function MarketModal() {
           <For each={MARKET.skill}>
             {(x) => (
               <div class="market-card">
-                <span class="picon">📘</span>
+                <span class="picon"><BookOpen size={14} strokeWidth={1.8} /></span>
                 <div class="inf"><b>{x.name}</b> <span class="badge gray">skill</span><Show when={skillInstalled().includes(x.id)}><span class="badge ok">已安装 · global</span></Show><div class="d">{x.desc}</div></div>
                 <Show when={skillInstalled().includes(x.id)} fallback={<button class="btn sm" onClick={() => void openUrl("https://github.com/Kilo-Org/kilo-marketplace")}>安装</button>}>
                   <button class="btn sm danger" onClick={() => store.notify("已确认卸载（global 作用域）· P2 后端支持")}>移除</button>
@@ -387,7 +399,7 @@ function InstallModal(props: { arg?: ModalArg }) {
         </div>
         <div class="field">
           <label>安装方式</label>
-          <select value={method()} onChange={(e) => setMethod(e.currentTarget.value as unknown as "npx" | "docker")}>
+          <select value={method()} onChange={(e) => setMethod(e.currentTarget.value === "docker" ? "docker" : "npx")}>
             {item().command ? (
               <>
                 <option value="npx">{item().command!.join(" ")}（推荐）</option>
@@ -455,9 +467,9 @@ function FeedbackModal() {
     <>
       <Head title="反馈" />
       <div class="mbody" style="display:flex;flex-direction:column;gap:10px">
-        <button class="btn" style="justify-content:center;padding:12px" onClick={() => void openUrl("https://github.com/Kilo-Org/kilocode/issues")}>🐙 提交 GitHub Issue</button>
-        <button class="btn" style="justify-content:center;padding:12px" onClick={() => void openUrl("https://discord.gg/kilo")}>💬 Discord 社区</button>
-        <button class="btn" style="justify-content:center;padding:12px" onClick={() => void openUrl("https://kilo.ai/support")}>🛟 联系支持</button>
+        <button class="btn" style="justify-content:center;padding:12px" onClick={() => void openUrl("https://github.com/Kilo-Org/kilocode/issues")}><TriangleAlert size={14} strokeWidth={1.8} style="vertical-align:-2px;margin-right:6px" />提交 GitHub Issue</button>
+        <button class="btn" style="justify-content:center;padding:12px" onClick={() => void openUrl("https://discord.gg/kilo")}><MessageSquare size={14} strokeWidth={1.8} style="vertical-align:-2px;margin-right:6px" />Discord 社区</button>
+        <button class="btn" style="justify-content:center;padding:12px" onClick={() => void openUrl("https://kilo.ai/support")}><LifeBuoy size={14} strokeWidth={1.8} style="vertical-align:-2px;margin-right:6px" />联系支持</button>
       </div>
     </>
   )
@@ -477,7 +489,7 @@ function AgentModal(props: { arg?: ModalArg }) {
     if (!id || !/^[A-Za-z0-9._-]+$/.test(id)) return store.notify("名称仅支持字母数字与 -_.")
     if (!directory()) return store.notify("请先选择项目文件夹")
     setBusy(true)
-    const err = await writeAgent(directory(), id, desc(), body()).catch((x: unknown) => String(x))
+    const err = await writeAgent(directory(), id, desc(), body()).then(() => "").catch((x: unknown) => String(x))
     setBusy(false)
     if (err) return store.notify("保存失败：" + err)
     closeModal()

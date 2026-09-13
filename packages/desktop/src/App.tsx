@@ -1,5 +1,6 @@
 import { createSignal, For, Show, onMount } from "solid-js"
 import type { Session } from "@kilocode/sdk/v2/types"
+import { Search, MessageSquare, Puzzle, Folder, FolderOpen, Pencil, Download, Trash2, Settings as SettingsIcon, GitBranch } from "lucide-solid"
 import logo from "./assets/logo.png"
 import { client, directory, info, ready, recents, setDirectory } from "./client"
 import { store } from "./store"
@@ -13,8 +14,6 @@ import { Profile } from "./views/Profile"
 import { Settings } from "./views/Settings"
 import { RightBar } from "./right/modules"
 import { Modals } from "./views/Modals"
-
-const BUILTIN = ["code", "build", "plan", "ask", "explore", "general"]
 
 const [grpProject, setGrpProject] = createSignal(true)
 const [grpAgent, setGrpAgent] = createSignal(true)
@@ -96,7 +95,7 @@ export function App() {
         <div class="right">
           <Show when={vcs().branch}>
             <span>
-              ⑂ {vcs().branch}
+              <GitBranch size={12} strokeWidth={1.8} style="vertical-align:-1px;margin-right:2px" /> {vcs().branch}
               <Show when={vcs().dirty}> · {vcs().dirty}</Show>
             </span>
           </Show>
@@ -110,17 +109,17 @@ export function App() {
         </div>
       </div>
 
-      <div classList={{ shell: true, "no-left": store.leftFold(), "no-right": store.rightFold() || !store.module() }}>
+      <div classList={{ shell: true, "no-left": store.leftFold(), "no-right": store.rightFold() }}>
         <aside class="sidebar">
           <div class="side-search" onClick={() => store.setView("history")}>
-            🔍 搜索会话… <span class="kbd">⌘K</span>
+            <Search size={13} strokeWidth={2} /> 搜索会话… <span class="kbd">⌘K</span>
           </div>
           <nav class="nav">
             <button class="item" classList={{ active: store.view() === "chat" && !store.current() }} onClick={() => void store.newSession()}>
-              <span class="ic">💬</span>新对话
+              <span class="ic"><MessageSquare size={14} strokeWidth={1.8} /></span>新对话
             </button>
             <button class="item" onClick={() => openModal("market")}>
-              <span class="ic">🧩</span>插件 / 市场
+              <span class="ic"><Puzzle size={14} strokeWidth={1.8} /></span>插件 / 市场
             </button>
           </nav>
           <div class="grp" onClick={() => setGrpProject((v) => !v)}>
@@ -132,14 +131,14 @@ export function App() {
               <For each={recents()}>
                 {(r) => (
                   <button class="item" style={r === directory() ? "font-weight:600" : undefined} title={r} onClick={() => void switchProject(r)}>
-                    <span class="ic">{r === directory() ? "📂" : "📁"}</span>
+                    <span class="ic">{r === directory() ? <FolderOpen size={14} strokeWidth={1.8} /> : <Folder size={14} strokeWidth={1.8} />}</span>
                     {nameOf(r)}
                   </button>
                 )}
               </For>
               <Show when={!recents().length}>
                 <button class="item" onClick={() => void newProject()}>
-                  <span class="ic">📁</span>打开项目文件夹…
+                  <span class="ic"><Folder size={14} strokeWidth={1.8} /></span>打开项目文件夹…
                 </button>
               </Show>
             </nav>
@@ -162,9 +161,9 @@ export function App() {
                               </button>
                               <span class="time">{ago(x.t)}</span>
                               <span class="act">
-                                <button title="重命名" onClick={() => startRename(x.s)}>✎</button>
-                                <button title="导出 Markdown" onClick={() => void exportSession(x.s.id)}>⤓</button>
-                                <button title="删除" onClick={() => void store.removeSession(x.s.id)}>🗑</button>
+                                <button title="重命名" onClick={() => startRename(x.s)}><Pencil size={12} strokeWidth={1.8} /></button>
+                                <button title="导出 Markdown" onClick={() => void exportSession(x.s.id)}><Download size={12} strokeWidth={1.8} /></button>
+                                <button title="删除" onClick={() => void store.removeSession(x.s.id)}><Trash2 size={12} strokeWidth={1.8} /></button>
                               </span>
                             </div>
                           }>
@@ -200,15 +199,15 @@ export function App() {
           </div>
           <Show when={grpAgent()}>
             <div class="sesslist" style="flex:none;max-height:110px">
-              <For each={store.agents().slice(0, 8)}>
+              <For each={store.agents().filter((a) => a.mode !== "subagent").slice(0, 8)}>
                 {(a) => (
                   <div class="sess" classList={{ active: store.agent() === a.id }}>
                     <span class="dot" classList={{ g: store.agent() === a.id, gr: store.agent() !== a.id }} />
                     <button class="t" title={a.description ?? ""} onClick={() => store.setAgent(store.agent() === a.id ? "" : a.id)}>
-                      {a.id} <span style="color:var(--faint)">{a.mode === "subagent" ? "（子代理）" : BUILTIN.includes(a.id) ? "" : "（自定义）"}</span>
+                      {a.id} <span style="color:var(--faint)">{a.builtIn ? (a.mode === "subagent" ? "（子代理）" : "") : "（自定义）"}</span>
                     </button>
                     <button class="act time" style="opacity:1" title="编辑" onClick={() => openModal("agent", { name: a.id })}>
-                      ✎
+                      <Pencil size={12} strokeWidth={1.8} />
                     </button>
                   </div>
                 )}
@@ -227,7 +226,7 @@ export function App() {
               </Show>
             </button>
             <button class="foot-item" classList={{ active: store.view() === "settings" }} onClick={() => store.setView("settings")}>
-              <span class="ic" style="width:16px;text-align:center;color:var(--muted)">⚙️</span>设置
+              <span class="ic" style="width:16px;text-align:center;color:var(--muted)"><SettingsIcon size={14} strokeWidth={1.8} /></span>设置
             </button>
           </div>
         </aside>
@@ -251,7 +250,7 @@ export function App() {
           </div>
         </main>
 
-        <Show when={!store.rightFold() && store.module()}>
+        <Show when={!store.rightFold()}>
           <RightBar />
         </Show>
       </div>

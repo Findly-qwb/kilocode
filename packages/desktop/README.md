@@ -40,12 +40,16 @@ bunx oxlint packages/desktop/src
 ## 目录
 
 ```
-src/                SolidJS 前端
+src/                SolidJS 前端（样式/布局按 design/kilo-desktop/prototype.html 1:1 移植）
   client.ts         后端连接、SSE 重连、目录/recents 状态
-  store.ts          全局信号、事件 reducer、会话/消息/助理/审批动作
-  views/            Chat / Plugins / Providers / Files / Settings
-src-tauri/          Rust 壳：spawn/守护 kilo serve、pick_dir、open_url、
-                    write_skill、write_agent、restart_backend（附加 CLI 参数与环境变量）
+  store.ts          全局信号、事件 reducer、会话/消息/审批/队列/模型动作
+  perm.ts           PermissionConfig（allow/ask/deny + 通配例外）读写助手
+  host.ts / vcs.ts / ui.ts   Tauri 封装 / git 状态 / 模态路由
+  App.tsx           titlebar + 左栏（项目/会话/助理/账户）+ 视图路由
+  views/            Chat / History / Profile / Settings(13 tab) / Modals
+  right/modules.tsx 右栏五模块：文件 / Git / 浏览器 / Diff / 用量
+src-tauri/          Rust 壳：spawn/守护 kilo serve、pick_dir、open_url、git_cmd、
+                     write_skill、write_agent、remove_mcp、restart_backend
 script/             dev.ts（注入仓库 CLI）、sidecar.ts（打包资源）
 ```
 
@@ -54,4 +58,4 @@ script/             dev.ts（注入仓库 CLI）、sidecar.ts（打包资源）
 - webview 中 `createResource` 模块加载即执行，必须挂 `ready()` source。
 - 主线程 Tauri 命令里禁用 blocking dialog。
 - `v2.fs.read` 返回 Blob；`v2.skill.list`/`v2.agent.list` 返回 `{location, data}` 双层。
-- 详见 REQUIREMENTS.md §10。
+- 屏幕映射与 P2 裁剪清单见 REQUIREMENTS.md。

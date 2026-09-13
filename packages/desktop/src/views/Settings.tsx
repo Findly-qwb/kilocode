@@ -1,5 +1,6 @@
 import { createEffect, createResource, createSignal, For, Show, type JSX } from "solid-js"
 import type { Config, Path, PermissionAction } from "@kilocode/sdk/v2/types"
+import { Puzzle, Trash2, BookOpen } from "lucide-solid"
 import { client, directory, forget, info, ready, recents, setDirectory } from "../client"
 import { health } from "../backend"
 import { saveConfig, store, type ModelRef } from "../store"
@@ -24,6 +25,45 @@ function ui(key: string, def: string) {
       localStorage.setItem("ui." + key, next)
     },
   }
+}
+
+// ---------- 后端 Config 读写（点分路径，运行时守卫，深合并顶层键） ----------
+
+function at(o: unknown, k: string): unknown {
+  if (!o || typeof o !== "object") return undefined
+  const box: Record<string, unknown> = { ...o }
+  return box[k]
+}
+function getCfg(path: string): unknown {
+  return path.split(".").reduce<unknown>((o, k) => at(o, k), store.config())
+}
+function cfgBool(path: string, def = false) { const v = getCfg(path); return typeof v === "boolean" ? v : def }
+function cfgStr(path: string, def = "") { const v = getCfg(path); return typeof v === "string" ? v : def }
+function cfgNum(path: string, def = 0) { const v = getCfg(path); return typeof v === "number" ? v : def }
+function cfgStrs(path: string) { const v = getCfg(path); return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [] }
+function cfgFlags(path: string) {
+  const v = getCfg(path)
+  const out: Record<string, boolean> = {}
+  if (v && typeof v === "object") {
+    const box: Record<string, unknown> = { ...v }
+    for (const k of Object.keys(box)) { const b = box[k]; if (typeof b === "boolean") out[k] = b }
+  }
+  return out
+}
+function setPath(path: string[], value: unknown, base: Record<string, unknown>): Record<string, unknown> {
+  const [head, ...rest] = path
+  if (!head) return base
+  if (!rest.length) return { ...base, [head]: value }
+  const child = base[head]
+  return { ...base, [head]: setPath(rest, value, child && typeof child === "object" ? { ...child } : {}) }
+}
+async function saveCfg(path: string, value: unknown) {
+  const keys = path.split(".")
+  const root = keys[0]
+  if (keys.length === 1) return saveConfig({ [root]: value })
+  const cur = at(store.config(), root)
+  const base = cur && typeof cur === "object" ? { ...cur } : {}
+  return saveConfig({ [root]: setPath(keys.slice(1), value, base) })
 }
 
 const [tab, setTab] = createSignal<Tab>("models")
@@ -87,6 +127,19 @@ function Sw(props: { on: boolean; onChange: (v: boolean) => void; disabled?: boo
   )
 }
 
+function CfgSw(props: { path: string; disabled?: boolean; fallback?: boolean }) {
+  return <Sw disabled={props.disabled} on={cfgBool(props.path, props.fallback ?? false)} onChange={(v) => void saveCfg(props.path, v)} />
+}
+
+function CfgSel(props: { path: string; options: { v: string; label?: string }[]; fallback?: string }) {
+  const cur = () => cfgStr(props.path, props.fallback ?? props.options[0].v)
+  return (
+    <select class="sel" value={cur()} onChange={(e) => void saveCfg(props.path, e.currentTarget.value)}>
+      <For each={props.options}>{(o) => <option value={o.v}>{o.label ?? o.v}</option>}</For>
+    </select>
+  )
+}
+
 function Row(props: { n: string; d?: string; children?: JSX.Element }) {
   return (
     <div class="srow">
@@ -142,11 +195,32 @@ function ModelsTab() {
             <For each={modelOpts()}>{(o) => <option value={o.v}>{o.label || "默认"}</option>}</For>
           </select>
         </Row>
+        <Row n="子代理模型" d="Task 派生子代理使用（写入 subagent_model）">
+          <select class="sel" value={cfgStr("subagent_model")} onChange={(e) => void saveCfg("subagent_model", e.currentTarget.value || undefined)}>
+            <For each={modelOpts()}>{(o) => <option value={o.v}>{o.label || "（沿用对话模型）"}</option>}</For>
+          </select>
+        </Row>
+        <Row n="子代理推理变体">
+          <select class="sel" value={cfgStr("subagent_variant")} onChange={(e) => void saveCfg("subagent_variant", e.currentTarget.value || undefined)}>
+            <option value="">默认</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
+          </select>
+        </Row>
         <Show when={cur()}>
           <Row n="推理变体" d="默认对话模型的档位">
             <VariantSelect model={() => store.model()} />
           </Row>
         </Show>
+      </Group>
+      <Group name="辅助模型">
+        <Row n="自动补全模型" d="Ghost text 行内补全（桌面 UI 态）">
+          <select class="sel" value={ui("completionModel", "").get()} onChange={(e) => ui("completionModel", "").set(e.currentTarget.value)}>
+            <For each={modelOpts()}>{(o) => <option value={o.v}>{o.label || "（不启用）"}</option>}</For>
+          </select>
+        </Row>
+        <Row n="语音转文字模型" d="push-to-talk 使用，需登录 Kilo（experimental.speech_to_text_model）">
+          <input class="tinp" placeholder="whisper-1" value={cfgStr("experimental.speech_to_text_model")} onInput={(e) => void saveCfg("experimental.speech_to_text_model", e.currentTarget.value || undefined)} />
+        </Row>
+        <Row n="隐藏 prompt-training 模型" d="不在选择器展示训练用途模型（hide_prompt_training_models）"><CfgSw path="hide_prompt_training_models" fallback={false} /></Row>
       </Group>
       <Group name="按模式（Code/Plan/Ask）的模型覆盖">
         <For each={["code", "plan", "ask"]}>
@@ -198,32 +272,60 @@ function ModeModelRow(props: { mode: string }) {
 function ProvidersTab() {
   const all = () => store.providers()
   const conn = () => new Set(all().connected)
+  const disabled = () => cfgStrs("disabled_providers")
+  const prof = () => store.profile()
+  const srcLabel = (s: string) => (s === "custom" ? "自定义" : s === "oauth" ? "OAuth" : s === "local" ? "本地" : "API Key")
+  const POPULAR = ["kilo", "anthropic", "deepseek", "openai", "google", "openrouter", "vercel"]
+  const popular = () => {
+    const free = all().all.filter((x) => !conn().has(x.id) && !disabled().includes(x.id))
+    const top = POPULAR.map((id) => free.find((x) => x.id === id)).filter((x): x is (typeof free)[number] => Boolean(x))
+    return [...top, ...free.filter((x) => !POPULAR.includes(x.id)).slice(0, 8)]
+  }
   return (
     <>
       <h3>供应商</h3>
       <div class="slead">Kilo Gateway 统一路由，或直连任意供应商（BYOK）</div>
+      <Group name="Kilo Gateway">
+        <Row n={prof()?.loggedIn ? `已登录 · ${prof()!.email ?? "Kilo"}` : "未登录 Kilo Gateway"} d={prof()?.loggedIn ? `${prof()!.tier ?? "Personal"} 组织 · 余额 ${prof()!.balance != null ? "$" + prof()!.balance!.toFixed(2) : "—"}` : "登录以使用统一路由 / 云端会话同步；本地 BYOK 不依赖登录"}>
+          <span classList={{ badge: true, ok: Boolean(prof()?.loggedIn), gray: !prof()?.loggedIn }}>{prof()?.loggedIn ? "✓ 已连接 · 统一路由/用量统计" : "未连接"}</span>
+          <Show when={!prof()?.loggedIn}><button class="btn sm" onClick={() => store.setView("profile")}>登录</button></Show>
+        </Row>
+      </Group>
       <Group name="已连接">
-        <For each={all().all.filter((p) => conn().has(p.id))}>
-          {(p) => (
-            <Row n={p.name} d={`${p.source} · ${Object.keys(p.models).length} 模型`}>
-              <span class="badge gray">{p.source}</span>
-              <Show when={p.source === "custom"}><button class="btn sm" onClick={() => openModal("custom", { provider: p.id })}>编辑</button></Show>
-              <button class="btn sm danger" onClick={() => void disconnect(p.id)}>断开</button>
+        <For each={all().all.filter((x) => conn().has(x.id))}>
+          {(x) => (
+            <Row n={x.name} d={`${srcLabel(x.source)} 直连 · ${Object.keys(x.models).length} 模型`}>
+              <span class="badge gray">{x.source}</span>
+              <Show when={x.source === "custom"}><button class="btn sm" onClick={() => openModal("custom", { provider: x.id })}>编辑</button></Show>
+              <button class="btn sm danger" onClick={() => void disconnect(x.id)}>断开</button>
             </Row>
           )}
         </For>
-        <Show when={!all().all.filter((p) => conn().has(p.id)).length}><div class="empty">未连接供应商</div></Show>
+        <Show when={!all().all.filter((x) => conn().has(x.id)).length}><div class="empty">未连接供应商</div></Show>
       </Group>
       <Group name="热门">
-        <For each={all().all.filter((p) => !conn().has(p.id)).slice(0, 25)}>
-          {(p) => (
-            <Row n={p.name} d={p.env.length ? `可用环境变量 ${p.env.join(", ")}` : "API 密钥 / OAuth"}>
-              <button class="btn sm primary" onClick={() => openModal("provider", { provider: p.id })}>连接</button>
+        <For each={popular()}>
+          {(x) => (
+            <Row n={x.name} d={x.env.length ? `可用环境变量 ${x.env.join(", ")}` : "API 密钥 / OAuth"}>
+              <button class="btn sm primary" onClick={() => openModal("provider", { provider: x.id })}>连接</button>
             </Row>
           )}
         </For>
-        <Row n="＋ 添加自定义供应商" d="OpenAI Compatible / Responses / Anthropic Messages 协议">
+        <Row n="＋ 添加自定义供应商" d="OpenAI Compatible / Responses / Anthropic Messages 协议；保存后自动拉取 /models">
           <button class="btn sm" onClick={() => openModal("custom")}>添加</button>
+        </Row>
+      </Group>
+      <Group name="已禁用供应商">
+        <Row n="禁用列表" d="禁用后不出现在选择器与热门（disabled_providers）">
+          <div class="taglist">
+            <Show when={disabled().length} fallback={<span style="color:var(--faint);font-size:11px">无</span>}>
+              <For each={disabled()}>{(d, i) => <span class="tag">{d} <span class="x" title="启用（移出禁用）" onClick={() => void saveCfg("disabled_providers", disabled().filter((_, j) => j !== i()))}>启用</span></span>}</For>
+            </Show>
+            <select class="tri" value="" onChange={(e) => { const v = e.currentTarget.value; if (v) void saveCfg("disabled_providers", [...disabled(), v]) }}>
+              <option value="">＋ 禁用…</option>
+              <For each={all().all.filter((x) => !conn().has(x.id) && !disabled().includes(x.id))}>{(x) => <option value={x.id}>{x.name}</option>}</For>
+            </select>
+          </div>
         </Row>
       </Group>
     </>
@@ -257,20 +359,37 @@ function BehaviourTab() {
       </div>
       {cur() === "Agents" && (
         <Group name="Agents">
+          <Row n="默认代理" d="新会话使用的模式（写入 default_agent）">
+            <select class="sel" value={cfgStr("default_agent")} onChange={(e) => void saveCfg("default_agent", e.currentTarget.value || undefined)}>
+              <option value="">自动</option>
+              <For each={store.agents().filter((a) => a.mode !== "subagent")}>{(a) => <option value={a.id}>{a.id}</option>}</For>
+            </select>
+          </Row>
           <div class="srow">
             <div class="c" style="width:100%">
-              <button class="btn sm" onClick={() => void import("../host").then((h) => h.openUrl("https://github.com/Kilo-Org/kilo-marketplace"))}>⤒ 导入 .agent.json</button>
-              <button class="btn sm" onClick={() => openModal("market")}>🧩 浏览市场</button>
-              <button class="btn sm primary" onClick={() => openModal("agent", { name: "" })}>＋ 新建助理</button>
+              <button class="btn sm" onClick={importMode}>⤒ 导入 Mode</button>
+              <button class="btn sm" onClick={() => openModal("market")}><Puzzle size={12} strokeWidth={1.8} style="vertical-align:-2px;margin-right:4px" />浏览市场</button>
+              <button class="btn sm primary" onClick={() => openModal("agent", { name: "" })}>＋ 新建模式</button>
             </div>
           </div>
           <For each={store.agents()}>
             {(a) => (
-              <Row n={a.id} d={a.description ?? ""}>
-                <span class="badge gray">{a.mode === "subagent" ? "sub" : "primary"}</span>
-                <button class="btn sm" onClick={() => openModal("agent", { name: a.id })}>编辑</button>
-                <button class="btn sm" onClick={() => { store.setAgent(a.id); store.notify("默认助理设为 " + a.id) }}>设默认</button>
-              </Row>
+              <div class="srow">
+                <div class="l">
+                  <div class="n">
+                    {a.id}{" "}
+                    <span classList={{ badge: true, gray: a.builtIn && a.mode !== "subagent", run: a.mode === "subagent", ok: !a.builtIn }}>
+                      {a.builtIn ? (a.mode === "subagent" ? "内置 · 子代理" : "内置 · 主代理") : "自定义 · 主代理"}
+                    </span>
+                  </div>
+                  <div class="d">{a.description ?? ""}</div>
+                </div>
+                <div class="c">
+                  <button class="btn sm" onClick={() => openModal("agent", { name: a.id })}>编辑</button>
+                  <button class="btn sm" title={`导出 ${a.id}.agent.json`} onClick={() => void exportAgent(a.id)}>⤓</button>
+                  <Show when={!a.builtIn}><button class="btn sm danger" onClick={() => void rmAgent(a.id)}>🗑</button></Show>
+                </div>
+              </div>
             )}
           </For>
         </Group>
@@ -279,7 +398,7 @@ function BehaviourTab() {
         <>
           <div class="sgroup">
             <div class="gh">MCP Servers
-              <button class="btn sm primary" style="margin-left:auto" onClick={() => openModal("market")}>🧩 市场安装</button>
+              <button class="btn sm primary" style="margin-left:auto" onClick={() => openModal("market")}><Puzzle size={12} strokeWidth={1.8} style="vertical-align:-2px;margin-right:4px" />市场安装</button>
               <button class="btn sm" onClick={() => openModal("mcp", {})}>＋ 手动添加</button>
             </div>
             <For each={mcp() ?? []}>
@@ -297,7 +416,7 @@ function BehaviourTab() {
                       <Show when={status === "needs_auth"}><button class="btn sm" onClick={() => void connectMcp(name)}>Sign in</button></Show>
                       <Sw on={status !== "disabled"} onChange={(v) => void toggleMcp(name, v)} />
                       <button class="btn sm" onClick={() => openModal("mcp", { mcp: name })}>编辑</button>
-                      <button class="btn sm danger" onClick={() => void rm(name)}>🗑</button>
+                      <button class="btn sm danger" onClick={() => void rm(name)}><Trash2 size={12} strokeWidth={1.8} /></button>
                     </div>
                   </div>
                 )
@@ -311,18 +430,17 @@ function BehaviourTab() {
       )}
       {cur() === "Rules" && (
         <Group name="Rules · 指令文件">
-          <Show when={(sources() ?? []).length} fallback={<div class="empty">未检测到指令文件</div>}>
-            <For each={sources() ?? []}>
-              {(s) => (
-                <Row n={s} d="每次请求注入系统提示">
-                  <button class="btn sm" onClick={() => void openPath(s)}>✎ 打开</button>
-                </Row>
-              )}
-            </For>
-          </Show>
-          <Row n="添加指令文件" d="AGENTS.md / .kilo/rules/*.md / CLAUDE.md 兼容">
+          <Row n="已加载指令" d="每次请求注入系统提示">
+            <div class="taglist">
+              <Show when={(sources() ?? []).length} fallback={<span style="color:var(--faint);font-size:11px">无</span>}>
+                <For each={sources() ?? []}>{(s) => <span class="tag" style="cursor:pointer" onClick={() => void openPath(s)}>{s.split(/[\\/]/).at(-1)} ✎</span>}</For>
+              </Show>
+            </div>
+          </Row>
+          <Row n="添加指令文件" d="支持 glob 与 URL（AGENTS.md / .kilo/rules/*.md / CLAUDE.md 兼容）">
             <button class="btn sm" onClick={() => void (directory() ? openPath(directory()) : store.notify("先选项目"))}>＋ 添加</button>
           </Row>
+          <Row n="Claude Code 兼容" d="读写 .claude/ 规则目录"><Sw on={ui("claudeCompat", "0").get() === "1"} onChange={(v) => ui("claudeCompat", "0").set(v ? "1" : "0")} /></Row>
         </Group>
       )}
       {cur() === "Workflows" && (
@@ -341,11 +459,11 @@ function BehaviourTab() {
       {cur() === "Skills" && (
         <>
           <div class="sgroup">
-            <div class="gh">Skills <button class="btn sm" style="margin-left:auto" onClick={() => void import("../host").then((h) => h.openUrl("https://github.com/Kilo-Org/kilo-marketplace"))}>🧩 浏览市场</button></div>
+            <div class="gh">Skills <button class="btn sm" style="margin-left:auto" onClick={() => void import("../host").then((h) => h.openUrl("https://github.com/Kilo-Org/kilo-marketplace"))}><Puzzle size={12} strokeWidth={1.8} style="vertical-align:-2px;margin-right:4px" />浏览市场</button></div>
             <For each={skills() ?? []}>
               {(s) => (
                 <div class="srow">
-                  <span class="picon">📘</span>
+                  <span class="picon"><BookOpen size={14} strokeWidth={1.8} /></span>
                   <div class="l">
                     <div class="n">{s.name.replace(/\.md$/, "")} <span class="badge gray">{s.location.includes("/.kilo") || s.location.includes("\\.kilo") ? "project" : "global"}</span> <span class="badge gray">skill</span></div>
                     <div class="d">{s.description} · {s.location}</div>
@@ -390,6 +508,41 @@ function BehaviourTab() {
     const { toggleSkill } = await import("../host")
     await toggleSkill(location, false).catch((e: unknown) => store.notify("停用失败：" + String(e)))
     setTick((t) => t + 1)
+  }
+  async function exportAgent(name: string) {
+    const list = (await client()?.app.agents({ directory: directory() }).catch(() => undefined))?.data ?? []
+    const a = list.find((x) => x.name === name)
+    if (!a) return store.notify("导出失败：未找到该代理")
+    const el = document.createElement("a")
+    el.href = URL.createObjectURL(new Blob([JSON.stringify(a, null, 2)], { type: "application/json" }))
+    el.download = `${name}.agent.json`
+    el.click()
+    store.notify(`已导出 ${name}.agent.json`)
+  }
+  function importMode() {
+    const el = document.createElement("input")
+    el.type = "file"
+    el.accept = ".json"
+    el.onchange = () => {
+      void (async () => {
+        const f = el.files?.[0]
+        if (!f) return
+        if (f.size > 1_000_000) return store.notify("导入失败：文件超过 1MB")
+        const v: { name?: string; description?: string; mode?: string; prompt?: string } = JSON.parse(await f.text())
+        if (!v.name) return store.notify("导入失败：缺少 name 字段")
+        const { writeAgent } = await import("../host")
+        await writeAgent(directory(), v.name, v.description ?? "", v.prompt ?? "", v.mode)
+        await store.refresh()
+        store.notify(`已导入模式 ${v.name}`)
+      })().catch(() => store.notify("导入失败：JSON 解析错误"))
+    }
+    el.click()
+  }
+  async function rmAgent(name: string) {
+    const { removeAgent } = await import("../host")
+    const err = await removeAgent(directory(), name).then(() => "").catch((e: unknown) => String(e))
+    store.notify(err ? `删除失败：${err}` : `已删除模式 ${name}`)
+    if (!err) await store.refresh()
   }
 }
 
@@ -446,7 +599,7 @@ function ApproveTab() {
                   <For each={exc(tool)}>{(ex) => (
                     <div class="er">
                       <span>•</span>
-                      <input class="pat" style="background:none;border:none;outline:none;color:inherit;font-family:var(--mono);min-width:0" value={ex.pattern} onInput={(e) => setPerm(withoutPattern(withPattern(perm(), tool, ex.pattern), e.currentTarget.value, ex.action))} />
+                      <input class="pat" style="background:none;border:none;outline:none;color:inherit;font-family:var(--mono);min-width:0" value={ex.pattern} onInput={(e) => setPerm(withPattern(withoutPattern(perm(), tool, ex.pattern), tool, e.currentTarget.value, ex.action))} />
                       <select class="tri" value={ex.action} onChange={(e) => setPerm(withPattern(perm(), tool, ex.pattern, act(e.currentTarget.value)))}>
                         <option value="allow">allow</option><option value="ask">ask</option><option value="deny">deny</option>
                       </select>
@@ -480,13 +633,14 @@ function BrowserTab() {
       <h3>浏览器 / Web 工具</h3>
       <div class="slead">Web 搜索与浏览器自动化</div>
       <Group>
-        <Row n="Web Search" d="启用联网检索（关闭即在自动批准页 deny）">
-          <Sw on={ui("websearch", "1").get() === "1"} onChange={(v) => ui("websearch", "1").set(v ? "1" : "0")} />
+        <Row n="Web Search" d="启用联网检索（写入 web_search）">
+          <CfgSw path="web_search" fallback={true} />
         </Row>
         <Row n="使用系统 Chrome" d="用本机 Chrome 而非内置 Chromium">
           <Sw on={ui("sysChrome", "1").get() === "1"} onChange={(v) => ui("sysChrome", "1").set(v ? "1" : "0")} />
         </Row>
         <Row n="Headless" d="无头模式（固定开启）"><Sw disabled on={true} onChange={() => {}} /></Row>
+        <Row n="浏览器自动化总开关" d="代理操作右栏浏览器模块（在实验性页也可控制）"><Sw on={ui("browserAuto", "0").get() === "1"} onChange={(v) => ui("browserAuto", "0").set(v ? "1" : "0")} /></Row>
       </Group>
     </>
   )
@@ -512,14 +666,19 @@ function DisplayTab() {
       <h3>显示</h3>
       <div class="slead">外观与转录渲染（桌面 UI 态，存本地）</div>
       <Group>
+        <Row n="用户名" d="显示在历史与遥测中（username）"><input class="tinp" value={cfgStr("username")} onInput={(e) => void saveCfg("username", e.currentTarget.value || undefined)} /></Row>
         <Row n="字号" d="10–24px">
           <input class="rng" type="range" min={10} max={24} step={0.5} value={font.get()} onInput={(e) => { font.set(e.currentTarget.value); document.body.style.fontSize = e.currentTarget.value + "px" }} />
           <span style="font-size:11px;color:var(--muted)">{font.get()}px</span>
         </Row>
-        <Row n="推理消息自动折叠"><Sw on={ui("foldThink", "1").get() === "1"} onChange={(v) => ui("foldThink", "1").set(v ? "1" : "0")} /></Row>
+        <Row n="推理消息自动折叠" d="思考块完成后自动收起（写入 auto_collapse_reasoning）"><CfgSw path="auto_collapse_reasoning" fallback={true} /></Row>
         <Row n="Shift+Tab 循环变体"><Sw on={ui("shiftTab", "1").get() === "1"} onChange={(v) => ui("shiftTab", "1").set(v ? "1" : "0")} /></Row>
         <Row n="Token 吞吐显示"><Sw on={ui("tps", "1").get() === "1"} onChange={(v) => ui("tps", "1").set(v ? "1" : "0")} /></Row>
         <Row n="显示自动批准原因"><Sw on={ui("permWhy", "0").get() === "1"} onChange={(v) => ui("permWhy", "0").set(v ? "1" : "0")} /></Row>
+        <Row n="桌面通知" d="回合完成 / 待批准 / 代理提问时发送系统通知（仅窗口未聚焦时）">
+          <Sw on={ui("osNotify", "1").get() === "1"} onChange={(v) => ui("osNotify", "1").set(v ? "1" : "0")} />
+          <button class="btn sm" onClick={() => void import("../host").then((h) => h.notifyOS("Kilo · 测试", "这是一条桌面通知"))}>测试</button>
+        </Row>
         <Row n="主题" d="浅/深/跟随系统">
           <select class="sel" value={store.theme()} onChange={(e) => {
             const v = e.currentTarget.value
@@ -528,9 +687,9 @@ function DisplayTab() {
             <option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option>
           </select>
         </Row>
-        <Row n="终端命令展示"><select class="sel" value={ui("bashOpen", "折叠").get()} onChange={(e) => ui("bashOpen", "折叠").set(e.currentTarget.value)}><option>展开</option><option>折叠</option></select></Row>
-        <Row n="代码编辑展示"><select class="sel" value={ui("editOpen", "折叠").get()} onChange={(e) => ui("editOpen", "折叠").set(e.currentTarget.value)}><option>折叠</option><option>展开</option></select></Row>
-        <Row n="MCP 工具展示"><select class="sel" value={ui("mcpOpen", "折叠").get()} onChange={(e) => ui("mcpOpen", "折叠").set(e.currentTarget.value)}><option>折叠</option><option>展开</option></select></Row>
+        <Row n="终端命令展示" d="写入 terminal_command_display"><CfgSel path="terminal_command_display" options={[{ v: "expanded", label: "展开" }, { v: "collapsed", label: "折叠" }]} fallback="expanded" /></Row>
+        <Row n="代码编辑展示" d="写入 code_edit_display"><CfgSel path="code_edit_display" options={[{ v: "expanded", label: "展开" }, { v: "collapsed", label: "折叠" }]} fallback="expanded" /></Row>
+        <Row n="MCP 工具展示" d="写入 mcp_tool_display"><CfgSel path="mcp_tool_display" options={[{ v: "expanded", label: "展开" }, { v: "collapsed", label: "折叠" }]} fallback="collapsed" /></Row>
       </Group>
       <RecentsList />
     </>
@@ -542,11 +701,22 @@ function ContextTab() {
     <>
       <h3>上下文</h3>
       <div class="slead">自动压缩与文件监听（部分写入全局 kilo.json）</div>
+      <Group name="项目记忆（/memory）">
+        <Row n="启用" d="跨会话长期记忆（桌面侧开关；后端 memory 键未暴露）"><Sw on={ui("memory", "1").get() === "1"} onChange={(v) => ui("memory", "1").set(v ? "1" : "0")} /></Row>
+        <Row n="自动固化" d="会话结束后台整理记忆"><Sw on={ui("memoryAuto", "1").get() === "1"} onChange={(v) => ui("memoryAuto", "1").set(v ? "1" : "0")} /></Row>
+        <Row n="存储路径"><div class="taglist" style="align-items:center"><span class="tag">~/.kilo/memory/</span><button class="btn sm" onClick={() => void (directory() ? openPath(directory()) : store.notify("先选项目"))}>Inspect</button></div></Row>
+      </Group>
       <Group name="压缩">
-        <Row n="自动压缩" d="接近上限时生成摘要分割线">
-          <Sw on={ui("autocompact", "1").get() === "1"} onChange={(v) => { ui("autocompact", "1").set(v ? "1" : "0"); void saveConfig({ autocompact: v }) }} />
+        <Row n="自动压缩" d="接近上限时生成摘要分割线（compaction.auto）"><CfgSw path="compaction.auto" fallback={true} /></Row>
+        <Row n="压缩模型" d="默认跟随聊天模型（桌面 UI 态）">
+          <select class="sel" value={ui("compactModel", "").get()} onChange={(e) => ui("compactModel", "").set(e.currentTarget.value)}>
+            <For each={modelOpts()}>{(o) => <option value={o.v}>{o.label || "（跟随聊天模型）"}</option>}</For>
+          </select>
         </Row>
-        <Row n="修剪旧内容" d="压缩时丢弃陈旧工具输出"><Sw on={ui("trimOld", "0").get() === "1"} onChange={(v) => ui("trimOld", "0").set(v ? "1" : "0")} /></Row>
+        <Row n="触发阈值 %" d="compaction.threshold_percent">
+          <input class="tinp" style="width:90px" value={String(cfgNum("compaction.threshold_percent", 92))} onInput={(e) => { const n = Number(e.currentTarget.value); if (Number.isFinite(n)) void saveCfg("compaction.threshold_percent", n) }} />
+        </Row>
+        <Row n="修剪旧内容" d="压缩时丢弃陈旧工具输出（compaction.prune）"><CfgSw path="compaction.prune" fallback={false} /></Row>
       </Group>
       <Group name="Watcher 忽略模式">
         <IgnoreTags />
@@ -574,22 +744,21 @@ function IgnoreTags() {
 
 function CommitTab() {
   const lang = ui("commitLang", "跟随界面")
-  const cover = ui("commitOverride", "0")
-  const prompty = ui("commitPrompt", "用 conventional commits 格式，中文，≤72 字符主题行")
+  const [cover, setCover] = createSignal(cfgStr("commit_message.prompt") !== "")
   return (
     <>
       <h3>提交信息</h3>
-      <div class="slead">Git 模块的 AI 提交信息生成（桌面 UI 态）</div>
+      <div class="slead">Git 模块的 AI 提交信息生成</div>
       <Group>
-        <Row n="提交信息语言">
+        <Row n="提交信息语言" d="语言切换后右栏点 AI 重新生成">
           <select class="sel" value={lang.get()} onChange={(e) => lang.set(e.currentTarget.value)}>
             <option>跟随界面</option><option>English</option><option>日本語</option>
           </select>
         </Row>
-        <Row n="覆盖默认提示词"><Sw on={cover.get() === "1"} onChange={(v) => cover.set(v ? "1" : "0")} /></Row>
-        <Show when={cover.get() === "1"}>
+        <Row n="覆盖默认提示词" d="写入 commit_message.prompt"><Sw on={cover()} onChange={(v) => { setCover(v); if (!v) void saveCfg("commit_message.prompt", undefined) }} /></Row>
+        <Show when={cover()}>
           <Row n="自定义 prompt">
-            <textarea class="tinp" style="height:56px;width:340px;max-width:60vw" value={prompty.get()} onInput={(e) => prompty.set(e.currentTarget.value)} />
+            <textarea class="tinp" style="height:56px;width:340px;max-width:60vw" value={cfgStr("commit_message.prompt")} onInput={(e) => void saveCfg("commit_message.prompt", e.currentTarget.value)} />
           </Row>
         </Show>
       </Group>
@@ -612,48 +781,59 @@ function IndexingTab() {
           <span classList={{ badge: true, ok: Boolean(status()), gray: !status() }}>{status() ? "● 就绪" : "○ 未启用"}</span>
         </Row>
       </Group>
-      <Group name="配置（Global）">
-        <Row n="启用索引"><Sw on={ui("index", "1").get() === "1"} onChange={(v) => ui("index", "1").set(v ? "1" : "0")} /></Row>
-        <Row n="Embedding Provider" d="Kilo / OpenAI / Ollama / Compatible / Gemini"><select class="sel"><option>Kilo</option><option>OpenAI</option><option>Ollama</option><option>Voyage</option></select></Row>
-        <Row n="向量库"><select class="sel"><option>LanceDB</option><option>Qdrant</option></select></Row>
-        <Row n="LanceDB 目录"><span class="tag">~/.kilo/index/</span></Row>
-        <Row n="文件扩展名"><input class="tinp" value={ui("indexExt", ".ts,.tsx,.js,.go,.py").get()} onInput={(e) => ui("indexExt", ".ts,.tsx,.js,.go,.py").set(e.currentTarget.value)} /></Row>
+      <Group name="配置（Global / 项目 两级作用域）">
+        <Row n="本机同意" d="首次启用需确认（机器本地）">
+          <Sw on={ui("indexConsent", "1").get() === "1"} onChange={(v) => { ui("indexConsent", "1").set(v ? "1" : "0"); void client()?.indexing.consent({ directory: directory(), enabled: v }).catch(() => {}) }} />
+        </Row>
+        <Row n="启用索引" d="写入 indexing.enabled"><CfgSw path="indexing.enabled" fallback={true} /></Row>
+        <Row n="禁用时仍显示输入框按钮" d="索引关闭时 @ 搜索按钮仍出现"><Sw on={ui("indexBtn", "0").get() === "1"} onChange={(v) => ui("indexBtn", "0").set(v ? "1" : "0")} /></Row>
+        <Row n="Embedding Provider" d="Kilo / OpenAI / Ollama / Compatible / Gemini / Mistral / Bedrock / OpenRouter / Voyage"><CfgSel path="indexing.provider" options={[{ v: "kilo" }, { v: "openai" }, { v: "ollama" }, { v: "openai-compatible" }, { v: "gemini" }, { v: "mistral" }, { v: "bedrock" }, { v: "openrouter" }, { v: "voyage" }]} fallback="kilo" /></Row>
+        <Row n="Embedding 模型" d="indexing.model"><input class="tinp" placeholder="kilo-embed-v2" value={cfgStr("indexing.model")} onInput={(e) => void saveCfg("indexing.model", e.currentTarget.value || null)} /></Row>
+        <Row n="向量维度" d="Kilo 时自动（indexing.dimension）"><input class="tinp" style="width:90px" value={String(cfgNum("indexing.dimension", 0) || "")} onInput={(e) => { const n = Number(e.currentTarget.value); void saveCfg("indexing.dimension", Number.isFinite(n) && n > 0 ? n : null) }} /></Row>
+        <Row n="向量库" d="写入 indexing.vectorStore"><CfgSel path="indexing.vectorStore" options={[{ v: "lancedb" }, { v: "qdrant" }]} fallback="lancedb" /></Row>
+        <Row n="LanceDB 目录"><span class="tag">{cfgStr("indexing.lancedb.directory") || "~/.kilo/index/"}</span></Row>
+        <Row n="文件扩展名" d="逗号分隔（indexing.fileExtensions）"><input class="tinp" value={cfgStrs("indexing.fileExtensions").join(",")} onInput={(e) => void saveCfg("indexing.fileExtensions", e.currentTarget.value.split(",").map((x) => x.trim()).filter(Boolean))} /></Row>
+        <Row n="Search Min Score" d="indexing.searchMinScore"><input class="tinp" style="width:90px" value={String(cfgNum("indexing.searchMinScore", 0.35))} onInput={(e) => { const n = Number(e.currentTarget.value); if (Number.isFinite(n)) void saveCfg("indexing.searchMinScore", n) }} /></Row>
+        <Row n="Search Max Results" d="indexing.searchMaxResults"><input class="tinp" style="width:90px" value={String(cfgNum("indexing.searchMaxResults", 20))} onInput={(e) => { const n = Number(e.currentTarget.value); if (Number.isFinite(n)) void saveCfg("indexing.searchMaxResults", n) }} /></Row>
+        <Row n="Embedding Batch Size" d="indexing.embeddingBatchSize"><input class="tinp" style="width:90px" value={String(cfgNum("indexing.embeddingBatchSize", 64))} onInput={(e) => { const n = Number(e.currentTarget.value); if (Number.isFinite(n)) void saveCfg("indexing.embeddingBatchSize", n) }} /></Row>
       </Group>
     </>
   )
 }
 
 function ExperimentalTab() {
-  const toggles: [string, string, boolean][] = [
-    ["代码格式化", "编辑后自动跑 formatter", false],
-    ["LSP", "启用语言服务协议诊断", true],
-    ["批量工具 batch", "一次调用多工具", false],
-    ["图像生成", "generate_image 工具", false],
-    ["共享代理看板", "SwarmBoard 多代理留言", false],
-    ["原生 Notebook 工具", "", false],
-    ["拒绝后继续循环", "deny 后不中断回合", false],
-    ["任务模型选择", "Task 子代理允许选模型", true],
+  const toggles: [string, string, string, boolean][] = [
+    ["批量工具 batch", "一次调用多工具", "experimental.batch_tool", false],
+    ["图像生成", "generate_image 工具", "experimental.image_generation", false],
+    ["共享代理看板", "SwarmBoard 多代理留言", "experimental.shared_agent_board", false],
+    ["原生 Notebook 工具", "启用 notebook 编辑工具", "experimental.native_notebook_tools", false],
+    ["拒绝后继续循环", "deny 后不中断回合", "experimental.continue_loop_on_deny", false],
+    ["任务模型选择", "Task 子代理允许选模型", "experimental.task_model_selection", true],
+    ["禁用粘贴摘要", "粘贴长文本不自动生成摘要", "experimental.disable_paste_summary", false],
+    ["隐私模式", "不上传遥测内容", "privacy_mode", false],
+    ["远程控制", "允许 app.kilo.ai 远程接管（需后端 --advertise）", "remote_control", false],
+    ["自动更新", "检查并安装更新", "autoupdate", true],
   ]
   return (
     <>
       <h3>实验性</h3>
-      <div class="slead">功能开关与工具 kill-switch（多为桌面 UI 态；生效范围随版本推进）</div>
+      <div class="slead">功能开关与工具 kill-switch（写入 experimental / 顶层 config 键）</div>
       <Group>
-        <For each={toggles}>{([t, d, def]) => <Row n={t} d={d}><Sw on={ui("exp." + t, def ? "1" : "0").get() === "1"} onChange={(v) => ui("exp." + t, def ? "1" : "0").set(v ? "1" : "0")} /></Row>}</For>
-        <Row n="会话分享">
-          <select class="sel" value={ui("share", "manual").get()} onChange={(e) => ui("share", "manual").set(e.currentTarget.value)}><option>manual</option><option>auto</option><option>disabled</option></select>
-        </Row>
-        <Row n="MCP 超时 ms"><input class="tinp" style="width:90px" value={ui("mcpTimeout", "60000").get()} onInput={(e) => ui("mcpTimeout", "60000").set(e.currentTarget.value)} /></Row>
-        <Row n="工具开关" d="逐个工具启用/禁用">
+        <For each={toggles}>{([t, d, path, def]) => <Row n={t} d={d}><CfgSw path={path} fallback={def} /></Row>}</For>
+        <Show when={cfgBool("experimental.image_generation")}><Row n="图像生成模型" d="experimental.image_generation_model"><input class="tinp" placeholder="agnes-image-2" value={cfgStr("experimental.image_generation_model")} onInput={(e) => void saveCfg("experimental.image_generation_model", e.currentTarget.value || undefined)} /></Row></Show>
+        <Row n="会话分享" d="manual / auto / disabled（写入 share）"><CfgSel path="share" options={[{ v: "manual" }, { v: "auto" }, { v: "disabled" }]} fallback="manual" /></Row>
+        <Row n="MCP 超时 ms" d="experimental.mcp_timeout"><input class="tinp" style="width:90px" value={String(cfgNum("experimental.mcp_timeout", 60000))} onInput={(e) => { const n = Number(e.currentTarget.value); if (Number.isFinite(n)) void saveCfg("experimental.mcp_timeout", n) }} /></Row>
+        <Row n="工具开关" d="逐个工具启用/禁用（写入 tools map）">
           <div class="taglist">
-            <For each={["read", "edit", "bash", "websearch", "browser", "chart", "image", "mcp:context7"]}>{(t) => (
-              <>
+            <For each={["read", "edit", "bash", "websearch", "browser", "task", "skill"]}>{(t) => {
+              const on = () => cfgFlags("tools")[t] ?? true
+              return (
                 <span class="tag" style="align-items:center">
                   {t}
-                  <button classList={{ switch: true, sm: true, on: ui("tool." + t, "1").get() === "1" }} onClick={() => ui("tool." + t, "1").set(ui("tool." + t, "1").get() === "1" ? "0" : "1")}><i /></button>
+                  <button classList={{ switch: true, sm: true, on: on() }} onClick={() => void saveCfg(`tools.${t}`, !on())}><i /></button>
                 </span>
-              </>
-            )}</For>
+              )
+            }}</For>
           </div>
         </Row>
       </Group>
@@ -663,13 +843,20 @@ function ExperimentalTab() {
 
 function SandboxTab() {
   const [support] = createResource(() => ready(), async (r) => (r ? ((await client()?.sandbox.support({ directory: directory() }))?.data as unknown) : undefined))
+  const list = (path: string) => cfgStrs(path).join("\n")
   return (
     <>
       <h3>沙箱</h3>
-      <div class="slead">命令执行隔离（macOS Seatbelt / Linux bubblewrap / Windows 受限令牌）</div>
+      <div class="slead">命令执行隔离（macOS Seatbelt / Linux bubblewrap / Windows 受限令牌），写入 sandbox 段</div>
       <Group>
-        <Row n="启用沙箱" d="命令在受限环境中执行（需后端 sandbox 支持）"><Sw on={ui("sandbox", "0").get() === "1"} onChange={(v) => ui("sandbox", "0").set(v ? "1" : "0")} /></Row>
-        <Row n="阻止网络访问" d="deny（默认）/ allow"><Sw on={ui("sbNet", "1").get() === "1"} onChange={(v) => ui("sbNet", "1").set(v ? "1" : "0")} /></Row>
+        <Row n="启用沙箱" d="命令在受限环境中执行"><CfgSw path="sandbox.enabled" fallback={false} /></Row>
+        <Row n="阻止网络访问" d="deny（默认）/ allow"><CfgSel path="sandbox.network" options={[{ v: "deny", label: "deny 阻止" }, { v: "allow", label: "allow 放行" }]} fallback="deny" /></Row>
+        <Row n="可写路径" d="sandbox.writable_paths，每行一个">
+          <textarea class="tinp" style="height:56px;width:340px;max-width:60vw;font-family:var(--mono)" value={list("sandbox.writable_paths")} onInput={(e) => void saveCfg("sandbox.writable_paths", e.currentTarget.value.split(/\n+/).filter(Boolean))} />
+        </Row>
+        <Row n="允许主机" d="sandbox.allowed_hosts，每行一个">
+          <textarea class="tinp" style="height:56px;width:340px;max-width:60vw;font-family:var(--mono)" value={list("sandbox.allowed_hosts")} onInput={(e) => void saveCfg("sandbox.allowed_hosts", e.currentTarget.value.split(/\n+/).filter(Boolean))} />
+        </Row>
         <Row n="平台支持检测"><span classList={{ badge: true, ok: Boolean(support()), gray: !support() }}>{support() ? "当前平台支持" : "未检测到支持"}</span></Row>
       </Group>
     </>
@@ -721,9 +908,8 @@ function AboutTab() {
         const f = el.files?.[0]
         if (!f) return
         try {
-          const obj: unknown = JSON.parse(await f.text())
-          if (typeof obj !== "object" || obj === null) return store.notify("导入失败：非法 JSON")
-          await saveConfig(obj as unknown as Record<string, unknown>)
+          const v: Config = JSON.parse(await f.text())
+          await saveConfig(v)
         } catch {
           store.notify("导入失败")
         }
@@ -751,7 +937,7 @@ function AboutTab() {
         <Row n="从 Roo Code 导入" d="迁移历史会话与规则"><button class="btn sm" onClick={() => store.notify("迁移向导：P2 排期中")}>开始迁移向导</button></Row>
         <Row n="重置全部设置" d="危险操作：仅清桌面 UI 态"><button class="btn sm danger" onClick={() => { Object.keys(localStorage).filter((k) => k.startsWith("ui.")).forEach((k) => localStorage.removeItem(k)); location.reload() }}>重置</button></Row>
         <Row n="后端管理" d="自定义 kilo serve 启动参数与环境变量"><button class="btn sm" onClick={() => void restartWith()}>重启后端</button></Row>
-        <Row n="数据存储" d="会话/消息持久化于 CLI 引擎数据库（<state>/kilo.db，WAL，与 CLI/扩展同库）">
+        <Row n="数据存储" d="会话/消息持久化于 CLI 引擎数据库（kilo.db · WAL · 与 CLI/扩展同库）">
           <span class="tag">{paths()?.state ?? "~/.local/share/kilo"}</span>
         </Row>
       </Group>

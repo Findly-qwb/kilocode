@@ -1,5 +1,6 @@
 import { createSignal, For, Show } from "solid-js"
 import type { Session } from "@kilocode/sdk/v2/types"
+import { Pencil, Trash2 } from "lucide-solid"
 import { store } from "../store"
 import { ago } from "../util"
 import { client, directory } from "../client"
@@ -31,16 +32,16 @@ export function History() {
     const c = client()
     if (!c) return
     const res = await c.kilo.cloudSessions({ directory: directory() }).catch(() => undefined)
-    const rows = (res?.data ?? []).filter((x): x is { id: string; title?: string; time?: { updated?: number; created?: number } } => typeof x === "object" && x !== null && "id" in x)
+    const rows = res?.data?.cliSessions ?? []
     setCloud(
       rows.map((x) => ({
-        id: x.id,
-        slug: x.id,
+        id: x.session_id,
+        slug: x.session_id,
         projectID: "cloud",
         directory: "",
-        version: "",
+        version: String(x.version),
         title: x.title ?? "云端会话",
-        time: { created: x.time?.created ?? Date.now(), updated: x.time?.updated ?? Date.now() },
+        time: { created: Date.parse(x.created_at) || Date.now(), updated: Date.parse(x.updated_at) || Date.now() },
       })),
     )
   }
@@ -64,7 +65,7 @@ export function History() {
               {(s) => (
                 <>
                   <Show when={renaming() === s.id} fallback={
-                    <button class="hrow" onClick={() => void store.open(s.id)}>
+                    <div class="hrow" style="cursor:pointer" onClick={() => void store.open(s.id)}>
                       <span classList={dotClass(tab() === "local" ? store.statusOf(s.id) : "")} />
                       <div class="col">
                         <div class="t">{s.title || "未命名"}</div>
@@ -76,10 +77,10 @@ export function History() {
                       </div>
                       <div class="wr">
                         <span>{ago(s.time.updated ?? s.time.created)}</span>
-                        <button title="重命名" onClick={(e) => { e.stopPropagation(); setRenaming(s.id); setRenameVal(s.title) }}>✎</button>
-                        <button title="删除" onClick={(e) => { e.stopPropagation(); void store.removeSession(s.id) }}>🗑</button>
+                        <button title="重命名" onClick={(e) => { e.stopPropagation(); setRenaming(s.id); setRenameVal(s.title) }}><Pencil size={12} strokeWidth={1.8} /></button>
+                        <button title="删除" onClick={(e) => { e.stopPropagation(); void store.removeSession(s.id) }}><Trash2 size={12} strokeWidth={1.8} /></button>
                       </div>
-                    </button>
+                    </div>
                   }>
                     <div class="hrow">
                       <input class="rn" value={renameVal()} autofocus onInput={(e) => setRenameVal(e.currentTarget.value)} onKeyDown={(e) => { if (e.key === "Enter") void commit() }} />

@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun script/dev.ts",
+    "tauri:dev": "bun script/dev.ts",
     "dev:vite": "vite",
     "build:vite": "vite build",
     "sidecar": "bun script/sidecar.ts",
@@ -13,10 +14,11 @@
   },
   "dependencies": {
     "@kilocode/sdk": "workspace:*",
+    "@kobalte/core": "catalog:",
     "@tauri-apps/api": "^2",
-    "@xterm/addon-fit": "0.11.0",
-    "@xterm/xterm": "6.0.0",
+    "@tauri-apps/plugin-notification": "^2",
     "dompurify": "catalog:",
+    "lucide-solid": "^0.544.0",
     "marked": "catalog:",
     "solid-js": "catalog:"
   },
