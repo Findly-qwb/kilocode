@@ -149,6 +149,17 @@ kilo run --auto "run tests and fix any failures"
 
 `--auto` disables all permission prompts and lets the agent execute any action without confirmation. Only use it in trusted environments.
 
+### Kilo Desktop
+
+A native desktop app (`packages/desktop/`) built with Tauri 2 + SolidJS. The UI is implemented by referencing the VS Code extension's webview (`packages/kilo-vscode/webview-ui/`), and the design source of truth — the high-fidelity prototype and milestone plan — lives in [`design/kilo-desktop/`](design/kilo-desktop/) (`prototype.html` + `PLAN.md`).
+
+- **Backend**: the `packages/opencode` CLI runs as a sidecar (`kilo serve`); sessions, messages, and config persist in the CLI's own `kilo.db` — the same database the CLI and extension share.
+- **UI**: three-column CodePilot layout (project/session sidebar · chat · right modules), streaming messages, tool cards, permission/question docks, model picker with preview, 13-tab settings, MCP/agent/skill management, git/diff/usage side modules, Kilo Gateway login (device OAuth, same flow as the extension), OS notifications, light/dark theming via a token layer ready for skins.
+- **Run dev**: `bun run desktop` from the repo root (or `bun run dev` in `packages/desktop/`).
+- **Package**: `bun run package` in `packages/desktop/` (builds the CLI sidecar + `tauri build` installer).
+
+See [`packages/desktop/README.md`](packages/desktop/README.md) and [`packages/desktop/REQUIREMENTS.md`](packages/desktop/REQUIREMENTS.md) for the feature matrix and honest scope.
+
 ### Documentation
 
 For configuration and everything else, [head over to the docs](https://kilo.ai/docs).
