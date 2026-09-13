@@ -151,6 +151,8 @@ kilo run --auto "run tests and fix any failures"
 
 ### Kilo Desktop
 
+![Kilo Desktop](desktop.png)
+
 A native desktop app (`packages/desktop/`) built with Tauri 2 + SolidJS. The UI is implemented by referencing the VS Code extension's webview (`packages/kilo-vscode/webview-ui/`), and the design source of truth — the high-fidelity prototype and milestone plan — lives in [`design/kilo-desktop/`](design/kilo-desktop/) (`prototype.html` + `PLAN.md`).
 
 - **Backend**: the `packages/opencode` CLI runs as a sidecar (`kilo serve`); sessions, messages, and config persist in the CLI's own `kilo.db` — the same database the CLI and extension share.
