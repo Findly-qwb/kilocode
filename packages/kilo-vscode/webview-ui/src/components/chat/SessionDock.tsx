@@ -2,8 +2,9 @@
 
 /**
  * One row between the transcript and composer. Both working and action states
- * stay in the same grid cell so the taller state reserves the row's height,
- * including wrapped actions in narrow sidebars. Blocking surfaces hide both.
+ * stay mounted in the same grid cell; the inactive one is hidden and out of
+ * flow, so the row is exactly as tall as the visible state. Blocking surfaces
+ * hide both.
  */
 import { type Component, type JSX } from "solid-js"
 import { useSession } from "../../context/session"
@@ -18,6 +19,7 @@ interface SessionDockProps {
   hasActions?: () => boolean
   /** True while a permission, question, suggestion, or requirement owns the row. */
   blocked?: boolean
+  onScrollToBottom?: () => void
   readonly?: boolean
 }
 
@@ -38,7 +40,7 @@ export const SessionDock: Component<SessionDockProps> = (props) => {
     <div class="session-dock" data-component="session-dock" data-active={active() ? "" : undefined}>
       <div class="session-dock-state" ref={goal.row} data-active={working() ? "" : undefined} aria-hidden={!working()}>
         <div class="session-working" ref={goal.lane} data-goal={goal.running() ? "" : undefined}>
-          <WorkingIndicator />
+          <WorkingIndicator onScrollToBottom={props.onScrollToBottom} />
           {goal.status()}
         </div>
       </div>

@@ -754,11 +754,16 @@ for (const disposed of [false, true]) {
 }
 
 it.instance(
-  "pauses a working goal when a human prompt arrives",
+  "keeps a working goal active and continues after a human prompt",
   Effect.gen(function* () {
     const { llm, prompt, session, command, metadata, paused, wait } = yield* setup()
     const gate = Promise.withResolvers<void>()
-    yield* llm.push(reply().wait(gate.promise).text("Goal step complete").stop(), reply().text("Human reply").stop())
+    yield* llm.push(
+      reply().wait(gate.promise).text("Goal step complete").stop(),
+      reply().text("Human reply").stop(),
+      reply().tool("goal_report", { status: "complete", reason: "Human input resolved the goal." }),
+      reply().text("Final report").stop(),
+    )
     yield* command(objective)
     yield* wait(1)
     const human = yield* prompt
@@ -769,17 +774,27 @@ it.instance(
         parts: [{ type: "text", text: "Answer this instead" }],
       })
       .pipe(Effect.forkChild)
-    yield* paused
+    yield* pollWithTimeout(
+      Effect.sync(() => (KiloSessionPromptQueue.snapshot(session.id).length > 0 ? true : undefined)),
+      "human prompt was not queued",
+      "10 seconds",
+    )
     gate.resolve()
     const response = yield* awaitWithTimeout(Fiber.join(human), "human prompt did not finish", "10 seconds")
     expect(response.parts).toEqual(expect.arrayContaining([expect.objectContaining({ text: "Human reply" })]))
+    yield* paused
     expect(yield* metadata).toMatchObject({
       ...retained,
-      "kilo.goal": { text: objective, active: false, status: "paused" },
+      "kilo.goal": {
+        text: objective,
+        active: false,
+        status: "complete",
+        reason: expect.stringContaining("Human input resolved the goal."),
+      },
     })
-    expect(JSON.stringify((yield* llm.hits).at(-1)?.body)).toContain("Answer this instead")
-    yield* Effect.sleep("5200 millis")
-    expect(yield* llm.hits).toHaveLength(2)
+    const bodies = (yield* llm.hits).map((hit) => JSON.stringify(hit.body))
+    expect(bodies.some((body) => body.includes("Answer this instead"))).toBe(true)
+    expect(bodies.some((body) => body.includes("Continue working toward this session goal"))).toBe(true)
   }),
   30_000,
 )
@@ -1131,7 +1146,7 @@ it.instance(
   30_000,
 )
 
-for (const kind of ["archived", "reverted", "busy"] as const) {
+for (const kind of ["archived", "reverted"] as const) {
   it.instance(
     `rejects goal start and resume on a ${kind} session without cancelling its turn`,
     Effect.gen(function* () {
@@ -1144,21 +1159,12 @@ for (const kind of ["archived", "reverted", "busy"] as const) {
       if (kind === "archived") yield* run.sessions.setArchived({ sessionID: run.session.id, time: Date.now() })
       if (kind === "reverted")
         yield* run.sessions.setRevert({ sessionID: run.session.id, revert: { messageID: base }, summary: undefined })
-      if (kind === "busy")
-        yield* run.prompt.prompt({
-          sessionID: run.session.id,
-          noReply: true,
-          parts: [{ type: "text", text: "Keep the goal paused" }],
-        })
       const metadata = yield* run.metadata
       const before = yield* run.sessions.messages({ sessionID: run.session.id })
       for (const args of ["Replace the objective", "resume"]) {
         const exit = yield* run.command(args).pipe(Effect.exit)
         expect(Exit.isFailure(exit)).toBe(true)
-        if (Exit.isFailure(exit))
-          expect(String(Cause.squash(exit.cause))).toContain(
-            kind === "busy" ? "Stop the current response" : "Restore this session",
-          )
+        if (Exit.isFailure(exit)) expect(String(Cause.squash(exit.cause))).toContain("Restore this session")
         expect(yield* run.metadata).toEqual(metadata)
         expect(KiloSessionPromptQueue.active(run.session.id)).toBe(base)
         expect((yield* run.status.get(run.session.id)).type).toBe("busy")
@@ -1171,6 +1177,44 @@ for (const kind of ["archived", "reverted", "busy"] as const) {
     }),
   )
 }
+
+it.instance(
+  "replaces a running ordinary response when starting a goal",
+  Effect.gen(function* () {
+    const run = yield* setup()
+    yield* run.llm.hang
+    const ordinary = yield* run.prompt
+      .prompt({
+        sessionID: run.session.id,
+        agent: "code",
+        model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test-model") },
+        parts: [{ type: "text", text: "Start ordinary work" }],
+      })
+      .pipe(Effect.forkChild)
+    yield* run.wait(1)
+    const base = KiloSessionPromptQueue.active(run.session.id)
+    expect(base).toBeDefined()
+
+    yield* run.llm.hang
+    const ack = yield* run.prompt.command({
+      sessionID: run.session.id,
+      agent: "code",
+      command: "goal",
+      arguments: `-- ${objective}`,
+      model: "test/test-model",
+    })
+    expect(ack.info.role).toBe("assistant")
+    yield* run.wait(1)
+    expect(yield* run.metadata).toMatchObject({
+      ...retained,
+      "kilo.goal": { text: objective, active: true, status: "active" },
+    })
+    yield* awaitWithTimeout(Fiber.await(ordinary), "ordinary response was not replaced")
+    expect(KiloSessionPromptQueue.active(run.session.id)).not.toBe(base)
+    yield* run.prompt.cancel(run.session.id)
+  }),
+  30_000,
+)
 
 it.instance(
   "rechecks descendant attention after goal replacement cancellation",
