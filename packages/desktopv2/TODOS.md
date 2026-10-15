@@ -135,6 +135,7 @@ rpi 事实已用 crates.io 真实源码核对完毕（结论见下节「rpi 事�
 | M1-26 | 费用估算标注「仅为估算，非实际账单」 | usage-modal outcome-done | §1 §14 | FE | 所有费用出现处均带声明，且展示服务端 usage 原值对照 | done |
 | M1-27 | 热重载 /reload 刷新 Skills 与 MCP | reload | §8 M5 | FE+Rust | 重载后候选列表更新并发事件 | wip |
 | M1-28 | 三队列排队条：busy 时入队 steering / follow_up，支持编辑 / 删除 / 提升 | queued | §6.1 §9.2 | Rust+FE | queue_state 事件驱动列表，queue_action 三条动作各自生效 | wip |
+| M1-29 | 渲染层换成 assistant-ui primitives（PLAN §5.2 的 `<Thread/>`）：MessageList 换 ThreadPrimitive/MessagePrimitive，卡片经 components 注册表注入 | chat-stream | §5.2 §2 | FE | 78 屏逐屏复跑，class 与皮肤 token 不变 | todo |
 
 ## M2. 会话与持久化（P0）
 

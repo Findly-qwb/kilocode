@@ -11,7 +11,7 @@ import { invoke } from "../ipc/bridge";
 import { runtime } from "../ipc/runtime";
 import type { ProviderRow } from "../ipc/protocol";
 import { ui, useUi } from "../ui/state";
-import { MessageList } from "../components/MessageList";
+import { Thread } from "../components/Thread";
 import { PromptBox } from "../components/PromptBox";
 
 const QUICK = [
@@ -185,7 +185,7 @@ function ChatInner() {
         </div>
       </div>
       {s.popover === "search" ? <Search /> : null}
-      <MessageList />
+      <Thread />
       <PromptBox />
     </>
   );

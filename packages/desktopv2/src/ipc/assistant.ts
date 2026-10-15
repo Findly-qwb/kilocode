@@ -21,7 +21,8 @@ import { invoke, runTurn } from "./bridge";
 import { runtime, type Block, type Message, type ToolPart } from "./runtime";
 import { ui } from "../ui/state";
 
-type Part = TextMessagePart | ReasoningMessagePart | ToolCallMessagePart;
+type Part = TextMessagePart | ReasoningMessagePart | ToolCallMessagePart | DataPart;
+type DataPart = { type: "data"; name: string; data: unknown };
 
 /** Block → assistant-ui content part；outcome/compact/error/question 属于我们的渲染，不下传 */
 function toParts(blocks: Block[]): Part[] {
