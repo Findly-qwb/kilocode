@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+# Two crates on purpose (PLAN.md §3.3 / §15, task constraint):
+#
+#   crates/kilo-host  pure host logic (IPC protocol, SQLite, permissions, git,
+#                     checkpoints, fs scan, adapter, event hub). No Tauri, no
+#                     rpi, no GUI stack -> `cargo test -p kilo-host` compiles in
+#                     seconds and the logic is unit-testable without a WebView.
+#   .                 the Tauri app crate. Depends on kilo-host and only forwards
+#                     IPC (commands.rs / events.rs). The heavy tauri build graph
+#                     must never sit between us and our own test suite.
+#
+# This workspace is deliberately NOT the repo-root workspace: the kilocode monorepo
+# is bun/turbo based and has no root Cargo.toml. Keep it scoped to desktopv2 so we
+# do not perturb the rest of the repo.
+members = ["src-tauri", "src-tauri/crates/kilo-host"]
+default-members = ["src-tauri/crates/kilo-host"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+kilo-host = { path = "src-tauri/crates/kilo-host" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "process", "fs"] }
+tokio-util = "0.7"
+rusqlite = { version = "0.40", features = ["bundled"] }
+ts-rs = { version = "12", features = ["serde-json-impl"] }
+sha2 = "0.10"
+tempfile = "3"
+
+# rpi is pinned to an exact version (PLAN §14: "固定依赖版本" — upstream is still 0.x
+# and every rpi type is confined to the adapter/tool seam so an upgrade touches one
+# place). `rpi-ai` has NO http providers on default features; the real Anthropic /
+# OpenAI-compatible providers sit behind `providers`.
+rpi-agent = "=0.3.24"
+rpi-ai = { version = "=0.3.24", features = ["providers"] }
+rpi-tools = "=0.3.24"
+rpi-harness = "=0.3.24"
+
+[profile.dev]
+debug = 1
+incremental = true
+
+[profile.release]
+# PLAN §13: keep these habits, but there is no size gate.
+lto = "thin"
+codegen-units = 1
+strip = true

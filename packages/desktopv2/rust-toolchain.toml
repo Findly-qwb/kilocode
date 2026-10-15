@@ -1,0 +1,7 @@
+[toolchain]
+# `stable` rather than an exact patch: the repo has one rustup toolchain installed
+# (stable-x86_64-apple-darwin) and pinning a patch version would make every cold
+# `cargo` invocation try to download a second toolchain.
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
